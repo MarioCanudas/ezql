@@ -11,6 +11,7 @@ async def lifespan(app: FastAPI):
     try:
         print("Connecting to the database...")
         db_service.connect()
+        app.state.db_service = db_service
         print("Database connection established.")
         yield
     except Exception as e:
