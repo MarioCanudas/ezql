@@ -1,13 +1,12 @@
 from typing import Optional
 
+# Import tables to register them with SQLModel metadata
+import models  # noqa: F401
 from pydantic import BaseModel
 from sqlalchemy import Engine, Inspector, inspect
 from sqlmodel import SQLModel, Table, create_engine
 
-# Import tables to register them with SQLModel metadata
-from backend import models  # noqa: F401
-
-DB_URL = "sqlite:///backend/ezql.db"
+DB_URL = "sqlite+libsql:///backend/ezql.db"
 
 
 class _SchemaValidationResult(BaseModel):

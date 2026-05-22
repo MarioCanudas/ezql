@@ -14,3 +14,4 @@ wheels/
 
 # SQLite database files
 *.db
+*.db-wal
