@@ -1,4 +1,9 @@
-from sqlmodel import Field, SQLModel
+from typing import TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from .databases import Databases
 
 
 class EngineBase(SQLModel):
@@ -9,3 +14,5 @@ class EngineBase(SQLModel):
 
 class Engines(EngineBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+
+    databases: list["Databases"] = Relationship(back_populates="engine")

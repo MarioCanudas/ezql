@@ -1,4 +1,9 @@
-from sqlmodel import Field, SQLModel
+from typing import TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
+if TYPE_CHECKING:
+    from .databases import Databases
 
 
 class UserBase(SQLModel):
@@ -12,3 +17,5 @@ class UserCreate(UserBase):
 
 class Users(UserBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+
+    databases: list["Databases"] = Relationship(back_populates="user")
