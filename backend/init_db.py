@@ -1,4 +1,4 @@
-import models  # noqa: F401
+from backend import models  # noqa: F401
 from sqlmodel import SQLModel, create_engine
 
 DB_URL = "sqlite:///backend/ezql.db"
