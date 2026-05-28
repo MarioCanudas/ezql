@@ -8,14 +8,19 @@ if TYPE_CHECKING:
 
 class UserBase(SQLModel):
     name: str = Field(unique=True, max_length=50)
-    hashed_password: str
 
 
-class UserCreate(UserBase):
+class UserCreate(SQLModel):
+    name: str = Field(max_length=50)
     password: str
+
+
+class UserRead(UserBase):
+    id: int
 
 
 class Users(UserBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    hashed_password: str
 
     databases: list["Databases"] = Relationship(back_populates="user")

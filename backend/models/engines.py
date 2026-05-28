@@ -12,6 +12,14 @@ class EngineBase(SQLModel):
     agent_context: str | None = Field(default=None)
 
 
+class EngineCreate(EngineBase):
+    pass
+
+
+class EngineRead(EngineBase):
+    id: int
+
+
 class Engines(EngineBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
 

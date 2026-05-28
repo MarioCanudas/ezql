@@ -6,5 +6,13 @@ class ModelBase(SQLModel):
     company: str = Field(default="Unknown Company", max_length=50)
 
 
+class ModelCreate(ModelBase):
+    pass
+
+
+class ModelRead(ModelBase):
+    id: int
+
+
 class Models(ModelBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
