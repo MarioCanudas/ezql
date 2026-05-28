@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import Engine, Inspector, inspect
 from sqlmodel import SQLModel, Table, create_engine
 
-DB_URL = "sqlite+libsql:///backend/ezql.db"
+DB_URL = "sqlite:///backend/ezql.db"
 
 
 class _SchemaValidationResult(BaseModel):
