@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from services import DBConnectionService
+from backend.routers import api_router
+from backend.services import DBConnectionService
 
 
 @asynccontextmanager
@@ -22,4 +23,30 @@ async def lifespan(app: FastAPI):
         print("Database connection closed.")
 
 
-app = FastAPI(lifespan=lifespan)
+tags_metadata = [
+    {
+        "name": "chats",
+        "description": "Create chats and keep a fast chat list with activity metadata.",
+    },
+    {"name": "messages", "description": "Append and read chat messages."},
+    {"name": "users", "description": "User profiles for owning chats and databases."},
+    {
+        "name": "databases",
+        "description": "Database connections (stored as hashed secrets).",
+    },
+    {"name": "engines", "description": "Supported database engines."},
+    {"name": "models", "description": "LLM models available to the chat agent."},
+]
+
+app = FastAPI(
+    title="EzQL API",
+    version="0.0.1",
+    description=(
+        "API backend for EzQL. Provides chat persistence, database metadata, and "
+        "model management endpoints for the Streamlit frontend."
+    ),
+    openapi_tags=tags_metadata,
+    lifespan=lifespan,
+)
+
+app.include_router(api_router, prefix="/api/v1")
