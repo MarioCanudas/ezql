@@ -1,7 +1,7 @@
 from typing import Optional
 
 # Import tables to register them with SQLModel metadata
-import models  # noqa: F401
+from backend import models  # noqa: F401
 from pydantic import BaseModel
 from sqlalchemy import Engine, Inspector, inspect
 from sqlmodel import SQLModel, Table, create_engine
