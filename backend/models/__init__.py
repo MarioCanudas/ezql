@@ -1,17 +1,27 @@
-from .chats import ChatBase, ChatCreate, ChatRead, ChatSummary, ChatUpdate, Chats
+from .chats import ChatBase, ChatCreate, ChatRead, Chats, ChatSummary, ChatUpdate
 from .databases import DatabaseBase, DatabaseCreate, DatabaseRead, Databases
 from .engines import EngineBase, EngineCreate, EngineRead, Engines
 from .messages import (
+    ChatReplyRequest,
+    ChatReplyResponse,
     Content,
     MessageBase,
     MessageCreate,
     MessageRead,
-    MessageUpdate,
     Messages,
+    MessageUpdate,
     Role,
 )
 from .models import ModelBase, ModelCreate, ModelRead, Models
-from .users import UserBase, UserCreate, UserRead, Users
+from .users import (
+    UserApiKeysRead,
+    UserApiKeysUpdate,
+    UserBase,
+    UserCreate,
+    UserLogin,
+    UserRead,
+    Users,
+)
 
 __all__ = [
     "ChatBase",
@@ -29,6 +39,8 @@ __all__ = [
     "EngineRead",
     "Engines",
     "Content",
+    "ChatReplyRequest",
+    "ChatReplyResponse",
     "MessageBase",
     "MessageCreate",
     "MessageRead",
@@ -39,8 +51,11 @@ __all__ = [
     "ModelCreate",
     "ModelRead",
     "Models",
+    "UserApiKeysRead",
+    "UserApiKeysUpdate",
     "UserBase",
     "UserCreate",
+    "UserLogin",
     "UserRead",
     "Users",
 ]

@@ -1,14 +1,8 @@
 from datetime import datetime
 from enum import Enum
-from typing import TypeAlias
 
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 from sqlmodel import JSON, Field, SQLModel
-
-
-JSONValue: TypeAlias = (
-    str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
-)
 
 
 class Role(str, Enum):
@@ -18,7 +12,7 @@ class Role(str, Enum):
 
 class Content(BaseModel):
     text: str
-    data: list[dict[str, JSONValue]] | None = None
+    data: list[dict[str, JsonValue]] | None = None
 
 
 class MessageBase(SQLModel):
@@ -30,7 +24,7 @@ class MessageBase(SQLModel):
     # serialization/deserialization to JSON when interacting with the database.
     # But alongside that, we also define a Pydantic model (Content) to enforce
     # the structure of the content data in our application logic.
-    content: dict[str, JSONValue] = Field(sa_type=JSON)
+    content: dict[str, JsonValue] = Field(sa_type=JSON)
 
     sent_at: datetime = Field(default_factory=datetime.now, index=True)
 
@@ -50,6 +44,16 @@ class MessageRead(SQLModel):
     role: Role
     content: Content
     sent_at: datetime
+
+
+class ChatReplyRequest(BaseModel):
+    content: Content
+    user_id: int | None = None
+
+
+class ChatReplyResponse(BaseModel):
+    user_message: MessageRead
+    assistant_message: MessageRead
 
 
 class Messages(MessageBase, table=True):
