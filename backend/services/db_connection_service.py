@@ -1,10 +1,11 @@
 from typing import Optional
 
+from pydantic import BaseModel
+from sqlalchemy import Engine, Inspector, inspect, text
+from sqlmodel import Session, SQLModel, Table, create_engine, select
+
 # Import tables to register them with SQLModel metadata
 from backend import models  # noqa: F401
-from pydantic import BaseModel
-from sqlalchemy import Engine, Inspector, inspect
-from sqlmodel import SQLModel, Table, create_engine
 
 DB_URL = "sqlite:///backend/ezql.db"
 
@@ -32,6 +33,9 @@ class DBConnectionService:
         """Initializes the database engine and validates the schema."""
         if self.engine is None:
             self.engine = create_engine(DB_URL, echo=True)
+            SQLModel.metadata.create_all(self.engine)
+            self._migrate_known_columns()
+            self._seed_supported_records()
             self.validate_or_raise()
 
     def disconnect(self) -> None:
@@ -44,18 +48,63 @@ class DBConnectionService:
         engine_validation = self._validate_schema()
         if not engine_validation.success:
             expected_schema = (
-                f"\n💡 Expected SQLModel schema:\n{engine_validation.expected_schema}"
+                f"\nExpected SQLModel schema:\n{engine_validation.expected_schema}"
                 if engine_validation.expected_schema
                 else ""
             )
             raise Exception(f"\n{engine_validation.message}\n{expected_schema}")
+
+    def _migrate_known_columns(self) -> None:
+        if self.engine is None:
+            return
+
+        inspector = inspect(self.engine)
+        if "users" not in inspector.get_table_names():
+            return
+
+        existing_columns = {column["name"] for column in inspector.get_columns("users")}
+        migrations = {
+            "openai_api_key": "ALTER TABLE users ADD COLUMN openai_api_key VARCHAR",
+            "deepseek_api_key": "ALTER TABLE users ADD COLUMN deepseek_api_key VARCHAR",
+        }
+        with self.engine.begin() as connection:
+            for column_name, statement in migrations.items():
+                if column_name not in existing_columns:
+                    connection.execute(text(statement))
+
+    def _seed_supported_records(self) -> None:
+        if self.engine is None:
+            return
+
+        from backend.models import Engines, Models
+
+        with Session(self.engine) as session:
+            engines = {
+                engine.name.casefold() for engine in session.exec(select(Engines))
+            }
+            if "sqlite3" not in engines:
+                session.add(
+                    Engines(
+                        name="SQLite3",
+                        is_supported=True,
+                        agent_context="Usa sintaxis compatible con SQLite.",
+                    )
+                )
+
+            models = {model.name.casefold() for model in session.exec(select(Models))}
+            if "gpt-4o-mini" not in models:
+                session.add(Models(name="gpt-4o-mini", company="OpenAI"))
+            if "deepseek-chat" not in models:
+                session.add(Models(name="deepseek-chat", company="DeepSeek"))
+
+            session.commit()
 
     def _validate_schema(self) -> _SchemaValidationResult:
         if self.engine is None:
             return _SchemaValidationResult(
                 success=False,
                 is_empty=True,
-                message="❌ Database engine is not initialized.",
+                message="Database engine is not initialized.",
             )
 
         inspector = inspect(self.engine)
@@ -71,17 +120,15 @@ class DBConnectionService:
 
         message_parts: list[str] = []
         if is_empty:
-            message_parts.append("⚠️ Database is empty.")
+            message_parts.append("Database is empty.")
         else:
             if missing_tables:
                 tables_list = "\n".join([f"    - {t}" for t in sorted(missing_tables)])
-                message_parts.append(f"❌ Missing tables:\n{tables_list}")
+                message_parts.append(f"Missing tables:\n{tables_list}")
 
             if extra_tables:
                 tables_list = "\n".join([f"    - {t}" for t in sorted(extra_tables)])
-                message_parts.append(
-                    f"❌ Extra tables found in database:\n{tables_list}"
-                )
+                message_parts.append(f"Extra tables found in database:\n{tables_list}")
 
         table_errors: dict[str, list[str]] = {}
         if not bool(missing_tables):
@@ -96,7 +143,7 @@ class DBConnectionService:
                 formatted_errors = "\n".join([f"      - {e}" for e in errors])
                 error_details.append(f"    Table '{table}':\n{formatted_errors}")
 
-            message_parts.append("❌ Column errors found:\n" + "\n".join(error_details))
+            message_parts.append("Column errors found:\n" + "\n".join(error_details))
 
         success = (
             not is_empty
