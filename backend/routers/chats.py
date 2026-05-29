@@ -5,17 +5,40 @@ from sqlmodel import Session, col, delete, select
 from backend.models import (
     ChatCreate,
     ChatRead,
+    ChatReplyRequest,
+    ChatReplyResponse,
+    Chats,
     ChatSummary,
     ChatUpdate,
-    Chats,
+    Content,
     Databases,
+    MessageRead,
     Messages,
     Models,
+    Role,
     Users,
+)
+from backend.services.llm_chat_service import (
+    LLMChatService,
+    LLMConfigurationError,
+    LLMGenerationError,
+    resolve_llm_provider,
 )
 from backend.utils.dependencies import get_session
 
 router = APIRouter(prefix="/chats", tags=["chats"])
+
+
+def _to_message_read(message: Messages) -> MessageRead:
+    if message.id is None:
+        raise HTTPException(status_code=500, detail="Message id missing.")
+    return MessageRead(
+        id=message.id,
+        chat_id=message.chat_id,
+        role=message.role,
+        content=Content.model_validate(message.content),
+        sent_at=message.sent_at,
+    )
 
 
 @router.get(
@@ -131,6 +154,91 @@ def update_chat(
     session.commit()
     session.refresh(chat)
     return chat
+
+
+@router.post(
+    "/{chat_id}/reply",
+    response_model=ChatReplyResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate reply",
+    description="Store a user message, generate an assistant reply, and persist both.",
+)
+def generate_reply(
+    chat_id: int,
+    payload: ChatReplyRequest,
+    session: Session = Depends(get_session),
+):
+    chat = session.get(Chats, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found.")
+    if payload.user_id is not None and payload.user_id != chat.user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Chat does not belong to the selected user.",
+        )
+    if not payload.content.text.strip():
+        raise HTTPException(status_code=400, detail="Message content is required.")
+
+    model = session.get(Models, chat.model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail="Model not found.")
+
+    user = session.get(Users, chat.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    provider = resolve_llm_provider(model.company, model.name)
+    api_key = user.deepseek_api_key if provider == "deepseek" else user.openai_api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Configure the selected model provider API key in your profile.",
+        )
+
+    user_message = Messages(
+        chat_id=chat_id,
+        role=Role.user,
+        content=payload.content.model_dump(),
+    )
+    session.add(user_message)
+    session.commit()
+    session.refresh(user_message)
+
+    history = session.exec(
+        select(Messages)
+        .where(col(Messages.chat_id) == chat_id)
+        .order_by(col(Messages.sent_at).asc(), col(Messages.id).asc())
+    ).all()
+
+    service = LLMChatService(
+        model_name=model.name,
+        provider=model.company,
+        api_key=api_key,
+    )
+    try:
+        assistant_text = service.generate_reply(history)
+    except LLMConfigurationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except LLMGenerationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The assistant could not generate a response. Please try again.",
+        ) from exc
+    assistant_content = Content(text=assistant_text, data=None)
+
+    assistant_message = Messages(
+        chat_id=chat_id,
+        role=Role.assistant,
+        content=assistant_content.model_dump(),
+    )
+    session.add(assistant_message)
+    session.commit()
+    session.refresh(assistant_message)
+
+    return ChatReplyResponse(
+        user_message=_to_message_read(user_message),
+        assistant_message=_to_message_read(assistant_message),
+    )
 
 
 @router.delete(
