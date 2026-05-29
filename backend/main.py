@@ -1,8 +1,14 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
 from backend.routers import api_router
 from backend.services import DBConnectionService
+
+ENV_PATH = Path(__file__).resolve().parents[1] / "frontend" / ".env"
+load_dotenv(ENV_PATH)
 
 
 @asynccontextmanager
