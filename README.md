@@ -62,4 +62,56 @@ ezql/
 
 ## Getting Started
 
-Work in progress ...
+### 1. Install dependencies
+
+```bash
+uv sync
+```
+
+### 2. Configure environment
+
+Model API keys are configured per user in the Streamlit profile/settings screen. The backend no longer requires global OpenAI or DeepSeek API keys.
+
+DeepSeek is used through LangChain's OpenAI-compatible chat client with the default base URL `https://api.deepseek.com`. Administrators can override provider base URLs when needed:
+
+```bash
+export OPENAI_BASE_URL="https://your-openai-compatible-endpoint/v1"
+export DEEPSEEK_BASE_URL="https://api.deepseek.com"
+```
+
+Frontend (optional overrides):
+
+```bash
+export EZQL_API_BASE_URL="http://localhost:8000/api/v1"
+```
+
+You can also set a Streamlit secret:
+
+```toml
+# .streamlit/secrets.toml
+API_BASE_URL = "http://localhost:8000/api/v1"
+```
+
+### 3. Initialize the database
+
+```bash
+uv run python backend/init_db.py
+```
+
+### 4. Run the backend
+
+```bash
+uv run fastapi dev backend/main.py
+```
+
+### 5. Run the frontend
+
+```bash
+uv run streamlit run frontend/app.py
+```
+
+### 6. Run both with poethepoet
+
+```bash
+uv run poe run-app
+```
