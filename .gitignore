@@ -15,3 +15,6 @@ wheels/
 # SQLite database files
 *.db
 *.db-wal
+
+# Streamlit files
+.streamlit/
