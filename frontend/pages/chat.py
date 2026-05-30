@@ -2,9 +2,7 @@ from typing import Any
 
 import streamlit as st
 from components import api_client, state, ui
-from dialogs.chat_dialog import create_chat_dialog
 from dialogs.chat_settings_dialog import chat_settings_dialog
-from dialogs.database_dialog import create_database_dialog
 
 
 def _active_chat_title(chats: list[dict[str, Any]], chat_id: int | None) -> str | None:
@@ -16,8 +14,10 @@ def _active_chat_title(chats: list[dict[str, Any]], chat_id: int | None) -> str 
     return chat["title"]
 
 
-def render() -> None:
+def render(chat_id: int | None = None) -> None:
     state.init_state()
+    if chat_id is not None:
+        st.session_state["selected_chat_id"] = chat_id
     if not st.session_state.logged_in:
         st.warning("Inicia sesión para usar el chat.")
         return
@@ -25,7 +25,6 @@ def render() -> None:
     try:
         users = api_client.list_users()
         models = api_client.list_models()
-        engines = api_client.list_engines()
     except api_client.ApiError as exc:
         st.error(str(exc))
         return
@@ -51,19 +50,8 @@ def render() -> None:
     active_title = _active_chat_title(chats, chat_id)
     st.caption(active_title or "Crea un chat para empezar a analizar tus datos.")
 
-    actions = st.columns(3)
-    if actions[0].button("Configurar chat", type="primary", use_container_width=True):
+    if st.button("Configurar chat", type="primary"):
         chat_settings_dialog(chats=chats, databases=databases, models=models)
-    if actions[1].button("Nuevo chat", use_container_width=True):
-        create_chat_dialog(
-            user_id=user["id"],
-            databases=databases,
-            models=models,
-            default_db_id=st.session_state.get("selected_db_id"),
-            default_model_id=st.session_state.get("selected_model_id"),
-        )
-    if actions[2].button("Agregar base", use_container_width=True):
-        create_database_dialog(users=users, engines=engines, default_user_id=user["id"])
 
     st.divider()
 

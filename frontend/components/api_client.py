@@ -157,13 +157,12 @@ def create_database(
     )
 
 
-@st.cache_data(ttl=3)
-def list_chats(
+def _chat_filters(
     *,
     user_id: int | None = None,
     db_id: int | None = None,
     model_id: int | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     params: dict[str, Any] = {}
     if user_id is not None:
         params["user_id"] = user_id
@@ -171,7 +170,34 @@ def list_chats(
         params["db_id"] = db_id
     if model_id is not None:
         params["model_id"] = model_id
-    return _request("GET", "/chats", params=params)
+    return params
+
+
+@st.cache_data(ttl=3)
+def list_chats(
+    *,
+    user_id: int | None = None,
+    db_id: int | None = None,
+    model_id: int | None = None,
+) -> list[dict[str, Any]]:
+    return _request(
+        "GET",
+        "/chats",
+        params=_chat_filters(user_id=user_id, db_id=db_id, model_id=model_id),
+    )
+
+
+def list_chat_summaries(
+    *,
+    user_id: int | None = None,
+    db_id: int | None = None,
+    model_id: int | None = None,
+) -> list[dict[str, Any]]:
+    return _request(
+        "GET",
+        "/chats",
+        params=_chat_filters(user_id=user_id, db_id=db_id, model_id=model_id),
+    )
 
 
 def create_chat(

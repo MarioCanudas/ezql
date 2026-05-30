@@ -14,6 +14,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "informacion, haz una pregunta breve para aclarar."
 )
 
+SUMMARY_SYSTEM_PROMPT = (
+    "Resume la conversacion para que otro analista pueda continuarla con memoria. "
+    "Conserva objetivos del usuario, decisiones, filtros, metricas, entidades, "
+    "periodos de tiempo y conclusiones importantes. No incluyas SQL, codigo ni "
+    "detalles tecnicos. Maximo 150 palabras."
+)
+
 
 @dataclass(frozen=True)
 class LLMProviderConfig:
@@ -72,18 +79,35 @@ class LLMChatService:
     temperature: float = 0.2
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
-    def _build_messages(self, history: Sequence[Messages]):
+    def _history_messages(self, history: Sequence[Messages]):
         messages = []
-        if self.system_prompt:
-            messages.append(SystemMessage(content=self.system_prompt))
-
         for entry in history:
             content = Content.model_validate(entry.content).text
             if entry.role == Role.user:
                 messages.append(HumanMessage(content=content))
             elif entry.role == Role.assistant:
                 messages.append(AIMessage(content=content))
+        return messages
 
+    def _build_messages(
+        self,
+        history: Sequence[Messages],
+        *,
+        summary: str | None = None,
+    ):
+        messages = []
+        if self.system_prompt:
+            messages.append(SystemMessage(content=self.system_prompt))
+        if summary:
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "Resumen persistente de este chat para mantener contexto: "
+                        f"{summary}"
+                    )
+                )
+            )
+        messages.extend(self._history_messages(history))
         return messages
 
     def _get_provider_config(self) -> LLMProviderConfig:
@@ -111,15 +135,44 @@ class LLMChatService:
             base_url=base_url,
         )
 
-    def generate_reply(self, history: Sequence[Messages]) -> str:
+    def _message_text(self, response_content) -> str:
+        if isinstance(response_content, str):
+            return response_content
+        return str(response_content)
+
+    def generate_reply(
+        self,
+        history: Sequence[Messages],
+        *,
+        summary: str | None = None,
+    ) -> str:
         client = self._build_client()
         try:
-            response = client.invoke(self._build_messages(history))
+            response = client.invoke(self._build_messages(history, summary=summary))
         except Exception as exc:
             raise LLMGenerationError(
                 "The assistant could not generate a response."
             ) from exc
 
-        if isinstance(response.content, str):
-            return response.content
-        return str(response.content)
+        return self._message_text(response.content)
+
+    def summarize_chat(
+        self,
+        history: Sequence[Messages],
+        *,
+        current_summary: str | None = None,
+    ) -> str:
+        client = self._build_client()
+        messages = [SystemMessage(content=SUMMARY_SYSTEM_PROMPT)]
+        if current_summary:
+            messages.append(
+                SystemMessage(content=f"Resumen anterior del chat: {current_summary}")
+            )
+        messages.extend(self._history_messages(history))
+
+        try:
+            response = client.invoke(messages)
+        except Exception as exc:
+            raise LLMGenerationError("The chat summary could not be updated.") from exc
+
+        return self._message_text(response.content).strip()

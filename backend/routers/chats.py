@@ -216,7 +216,7 @@ def generate_reply(
         api_key=api_key,
     )
     try:
-        assistant_text = service.generate_reply(history)
+        assistant_text = service.generate_reply(history, summary=chat.summary)
     except LLMConfigurationError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except LLMGenerationError as exc:
@@ -234,6 +234,17 @@ def generate_reply(
     session.add(assistant_message)
     session.commit()
     session.refresh(assistant_message)
+
+    updated_history = [*history, assistant_message]
+    try:
+        chat.summary = service.summarize_chat(
+            updated_history,
+            current_summary=chat.summary,
+        )
+        session.add(chat)
+        session.commit()
+    except LLMGenerationError:
+        session.rollback()
 
     return ChatReplyResponse(
         user_message=_to_message_read(user_message),
