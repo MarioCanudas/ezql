@@ -1,160 +1,153 @@
 # EzQL 🚀
 > **Talk to your data, get answers—not just code.**
 
-EzQL is an intelligent, minimalist web application designed to democratize data analytics. Instead of forcing users to learn SQL or complex BI tools, EzQL allows anyone to connect a database and ask questions in plain, natural language. 
+EzQL is an intelligent, minimalist web application designed to democratize data analytics. Instead of forcing users to learn SQL or complex BI tools, EzQL lets anyone connect a database and ask questions in plain language.
 
-Unlike traditional Text-to-SQL utilities that just dump lines of code for the user to copy-paste, **EzQL acts as an autonomous data analyst built into a chat window.** It completely hides technical complexity, delivering beautifully formatted summaries, dynamic data visualizations, and implicit statistical analysis.
+Unlike traditional Text-to-SQL utilities that dump code for developers, **EzQL acts as an autonomous data analyst in a chat interface**. It aims to hide technical complexity and return business-friendly answers, summaries, and (eventually) visualizations.
 
 ---
 
 ## Architecture Philosophy
 
-EzQL is built with a **decoupled architecture**, strictly separating the presentation layer from the core business logic:
+EzQL is built with a **decoupled architecture**, strictly separating the presentation layer from core business logic:
 
-*   **Backend (FastAPI):** Acts as the centralized brain. It exposes a secure REST API that manages database connections, orchestrates the LangChain agentic workflows, executes implicit statistical routines, and returns structured JSON payloads (containing text, chart data structures, or tabular results).
-*   **Frontend (Streamlit for MVP):** A lightweight client that talks exclusively to the FastAPI backend. By keeping this layer completely separate, the user interface can be seamlessly rewritten in other frameworks (like React, Next.js, or Vue) in the future without modifying a single line of the AI core.
+- **Backend (FastAPI):** The “brain”. Exposes a REST API, handles persistence, database/runtime handling, model orchestration, and returns structured JSON to the UI.
+- **Frontend (Streamlit MVP):** A thin client that talks only to the FastAPI API. This keeps UI replaceable (React/Next/Vue later) without rewriting the backend.
 
 ---
 
 ## Core Features
 
-*   **Plug & Play Connectivity:** A simple, secure interface to upload or link your database (starting with SQLite files for the MVP) and start chatting instantly.
-*   **Total Code Abstraction:** End-users never see SQL queries or Python scripts. EzQL prioritizes human readability, clean typography, and elegant presentation.
-*   **Implicit Statistical Intelligence:** Equipped with an "invisible" analytics engine. If a user asks, *"Is our revenue this month significantly different from last month?"*, the AI agent autonomously decides to run a hypothesis test (like a T-test) or regression model under the hood, translating complex mathematical rigor into plain business insights.
-*   **Dynamic Visualizations:** EzQL doesn't just return tables. If the data benefits from visual impact, the backend delivers raw chart configurations that the frontend automatically renders as clean, interactive plots (line, bar, or scatter).
-*   **Context-Aware Reasoning:** The agent analyzes table metadata to understand abstract business concepts (e.g., "churn risk," "peak demand," or "profit margins") without requiring strict column-name phrasing from the user.
+- **Plug & play (SQLite-first):** Upload a SQLite database file and start chatting.
+- **Total code abstraction:** End-users should not see SQL or Python.
+- **Implicit statistical intelligence (roadmap):** The agent can apply statistical routines when relevant and translate results into plain language.
+- **Context-aware reasoning:** Uses schema metadata to answer business questions without requiring strict column-name phrasing.
 
 ---
 
 ## 🛠️ Tech Stack
 
-EzQL leverages a modern, robust, and highly modular stack optimized for rapid AI deployment:
-
-*   **Environment & Package Management:** [uv](https://github.com/astral-sh/uv) – An extremely fast Python package installer and resolver, managing dependencies via a centralized workspace and `pyproject.toml`.
-*   **Backend API Engine:** [FastAPI](https://fastapi.tiangolo.com/) – For high-performance, asynchronous REST API routing and native Pydantic data validation.
-*   **AI Orchestration & Agents:** [LangChain](https://www.langchain.com/) – The backbone of the application, utilizing autonomous SQL Agents (`SQLDatabaseToolkit`) that follow iterative refinement loops to self-correct queries.
-*   **Frontend Client:** [Streamlit](https://streamlit.io/) – Serving as a reactive UI layer for the MVP, effortlessly rendering markdown, dataframes, and charts consumed from the API.
+- **Environment & dependencies:** [uv](https://docs.astral.sh/uv/) (fast Python + dependency management via `pyproject.toml` + `uv.lock`).
+- **Backend:** [FastAPI](https://fastapi.tiangolo.com/) + Pydantic/SQLModel.
+- **LLM orchestration:** LangChain (`langchain-openai`).
+- **Frontend:** [Streamlit](https://streamlit.io/) (MVP).
 
 ---
 
 ## 📂 Project Structure
 
-This project uses a unified monorepo structure managed by `uv`, keeping backend and frontend code bases cleanly isolated.
-
 ```text
 ezql/
-├── README.md                # Project documentation
-├── pyproject.toml           # Root workspace configuration and shared metadata
-├── uv.lock                  # Universal lockfile generated automatically by uv
+├── README.md
+├── pyproject.toml
+├── uv.lock
 │
-├── backend/                 # FastAPI Application (The Brain)
-│   ├── main.py              # FastAPI entrypoint and API routing
-│   ├── routers/             # API route definitions
-│   └── services/            # Service layer for backend logic
+├── backend/                 # FastAPI application
+│   ├── main.py              # FastAPI entrypoint
+│   ├── routers/             # API routes
+│   └── services/            # Service layer
 │
-└── frontend/                # Streamlit Application (The UI Layer)
-    ├── app.py               # Main Streamlit web interface
-    ├── components/          # Reusable Streamlit components
-    └── pages/               # Streamlit page components
+└── frontend/                # Streamlit application
+    ├── app.py
+    ├── components/
+    └── pages/
 ```
 
 ---
 
-## Desarrollo local (configuración y ejecución)
+## Local Development (setup & run)
 
-> Ejecuta todos los comandos desde la raíz del repo (donde están `pyproject.toml` y `uv.lock`).
+> Run all commands from the repo root (where `pyproject.toml` and `uv.lock` live).
 
-### Requisitos
+### Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) (gestiona Python + dependencias)
-- (Opcional) `sqlite3` CLI si quieres generar la base de prueba (`frontend/test_data/netflix.db`).
+- [uv](https://docs.astral.sh/uv/) installed
+- (Optional) `sqlite3` CLI, if you want to build the bundled sample database locally
 
-> Python requerido por el proyecto: `>=3.13` (uv lo gestiona automáticamente).
+> The project requires Python `>=3.13` (uv will manage this automatically).
 
-### 1) Instalar dependencias
+### 1) Install dependencies
 
 ```bash
 uv sync
 ```
 
-### 2) Configuración (URLs y proveedores de modelos)
+### 2) Configure the frontend → backend URL (Streamlit Secrets)
 
-#### Frontend → Backend (API base URL)
+The frontend reads the backend base URL from **Streamlit Secrets** (`st.secrets["API_BASE_URL"]`).
 
-Por defecto el frontend llama a `http://localhost:8000/api/v1`.
+To configure it locally:
 
-Si tu backend corre en otra URL/puerto, puedes configurarlo de dos formas:
-
-1) **Streamlit secrets (recomendado):** crea/edita `frontend/.streamlit/secrets.toml` (no se sube al repo):
+1. Ensure the folder exists: `frontend/.streamlit/`
+2. Create/edit `frontend/.streamlit/secrets.toml`:
 
 ```toml
+# frontend/.streamlit/secrets.toml
 API_BASE_URL = "http://localhost:8000/api/v1"
 ```
 
-2) **Variable de entorno al ejecutar Streamlit:**
+Notes:
+
+- If you don’t set anything, the default is `http://localhost:8000/api/v1`.
+- `frontend/.streamlit/` is ignored by git, so this file won’t be committed.
+
+### 3) Configure model API keys (inside the app)
+
+API keys (OpenAI / DeepSeek) are configured **inside the web UI** on the Settings/Profile screen.
+
+- You do **not** need environment variables for API keys.
+- Keys are stored locally in EzQL’s internal SQLite database (`backend/ezql.db`).
+- If you delete `backend/ezql.db`, you’ll need to set the keys again.
+
+### 4) Databases (important)
+
+EzQL uses **two different kinds of databases** when running locally:
+
+#### A) EzQL internal app database (persistence)
+
+- File: `backend/ezql.db` (SQLite)
+- Stores: users, chats, messages, and **per-user model API keys**
+- Created/migrated automatically when the backend starts
+- Not versioned (SQLite files are ignored via `.gitignore`)
+
+Quick reset (wipes local users/chats/keys):
 
 ```bash
-export EZQL_API_BASE_URL="http://localhost:8000/api/v1"
+rm -f backend/ezql.db
 ```
 
-#### Backend → Proveedor LLM (base URLs)
-
-Las **API keys** (OpenAI / DeepSeek) se configuran **por usuario dentro de la UI** (pantalla **Configuración → Perfil**) y se guardan localmente en la base interna de EzQL.
-
-Si necesitas apuntar a un endpoint OpenAI-compatible o cambiar el base URL de DeepSeek, usa variables de entorno (el backend también intenta cargar `frontend/.env` si existe):
-
-```bash
-export OPENAI_BASE_URL="https://your-openai-compatible-endpoint/v1"
-export DEEPSEEK_BASE_URL="https://api.deepseek.com"
-```
-
-Opcionalmente puedes crear `frontend/.env` (no se sube al repo) con esas variables:
-
-```bash
-# frontend/.env
-OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-```
-
-### 3) Bases de datos (muy importante)
-
-EzQL usa **dos tipos** de base de datos cuando lo corres en local:
-
-#### A) Base interna de EzQL (persistencia de la app)
-
-- Archivo: `backend/ezql.db` (SQLite)
-- Contiene: usuarios, chats, mensajes, modelos/engines disponibles, etc.
-- Se crea/migra automáticamente al arrancar el backend.
-- Por seguridad **no se versiona** (`*.db` está en `.gitignore`).
-- Reset rápido: borra `backend/ezql.db` y vuelve a arrancar (perderás usuarios/chats locales).
-
-> (Opcional) También puedes inicializarla manualmente:
+> Optional: you can also initialize it manually:
 >
 > ```bash
 > uv run python backend/init_db.py
 > ```
 
-#### B) Base de datos que vas a analizar (tus datos)
+#### B) The database you want to analyze (your data)
 
-En el MVP, EzQL analiza bases **SQLite** (`.db`, `.sqlite`, `.sqlite3`).
+In the current MVP, EzQL analyzes **SQLite** files (`.db`, `.sqlite`, `.sqlite3`).
 
-- En **Chats → Nuevo chat** puedes:
-  - **Subir un archivo SQLite** (se guarda como base **temporal**, solo vive durante el runtime actual del backend).
-  - Usar la **base de prueba Netflix**.
-- Si reinicias el backend, tendrás que volver a cargar el archivo y recrear el chat (esto es intencional).
+You can:
 
-##### Base de prueba “Netflix” (no se sube al repo)
+- **Upload a SQLite file** when creating a new chat.
+- Use a **bundled sample dataset** (Netflix).
 
-Por seguridad, el archivo `frontend/test_data/netflix.db` **no se versiona**. El repo incluye el dataset `frontend/test_data/netflix_titles.csv`.
+Important runtime behavior:
 
-Para generar la base de prueba:
+- Uploaded SQLite files are treated as **temporary runtime databases**.
+- If the backend process restarts, you must upload the SQLite file again (and typically recreate the chat).
+
+#### Netflix sample database (not committed)
+
+For safety, the SQLite file `frontend/test_data/netflix.db` is **not committed** to the repo (all `*.db` files are ignored). The repo includes the CSV dataset at `frontend/test_data/netflix_titles.csv`.
+
+To build the sample database locally:
 
 ```bash
 cd frontend/test_data
 sqlite3 netflix.db
 ```
 
-Luego, dentro del prompt de `sqlite3`, ejecuta:
+Then inside the `sqlite3` prompt:
 
 ```sql
 CREATE TABLE netflix_titles (
@@ -175,11 +168,9 @@ CREATE TABLE netflix_titles (
 .import netflix_titles.csv netflix_titles
 ```
 
-(Referencia completa: `frontend/test_data/README.md`.)
+### 5) Start the app
 
-### 4) Arrancar la app
-
-#### Opción A — Dos terminales (recomendado, cross-platform)
+#### Option A — Two terminals (recommended, cross-platform)
 
 Terminal 1 (backend):
 
@@ -193,34 +184,34 @@ Terminal 2 (frontend):
 uv run streamlit run frontend/app.py
 ```
 
-URLs útiles:
+Useful URLs:
 
 - Frontend (Streamlit): `http://localhost:8501`
 - API docs (FastAPI): `http://localhost:8000/docs`
 
-#### Opción B — Un solo comando (macOS/Linux)
+#### Option B — One command (macOS/Linux)
 
 ```bash
 uv run poe run-app
 ```
 
-> Nota: esta tarea usa `lsof`/`kill` para liberar el puerto 8000. En Windows es mejor usar la opción de dos terminales.
+> This task uses `lsof`/`kill` to free port 8000. On Windows, use the two-terminal option.
 
-### 5) Primer uso (paso a paso)
+### 6) First run checklist
 
-1. Abre el frontend en `http://localhost:8501`.
-2. Crea el primer usuario (botón **Crear usuario**) e inicia sesión.
-3. Ve a **Configuración → Perfil** y configura tu API key (OpenAI o DeepSeek).
-4. Ve a **Chats → Nuevo chat** y elige:
-   - **Usar base de prueba Netflix** (requiere `frontend/test_data/netflix.db`), o
-   - **Subir archivo SQLite .db** (tu propia base).
+1. Open the frontend at `http://localhost:8501`.
+2. Create your first local user and log in.
+3. Go to Settings/Profile and add your OpenAI or DeepSeek API key.
+4. Create a new chat and choose either:
+   - the Netflix sample database (if you built `frontend/test_data/netflix.db`), or
+   - upload your own SQLite file.
 
-### 6) Apagar la app
+### 7) Stop the app
 
-- Si la ejecutas en dos terminales: `Ctrl + C` en cada una.
-- Si usas `poe run-app`: `Ctrl + C` una vez (Streamlit se detiene y el script mata el backend).
+- If running in two terminals: press `Ctrl + C` in each terminal.
+- If running via `uv run poe run-app`: press `Ctrl + C` once (the task stops Streamlit and terminates the backend).
 
-Si algún puerto queda ocupado (macOS/Linux):
+If a port is stuck (macOS/Linux):
 
 ```bash
 lsof -ti tcp:8000 | xargs kill
