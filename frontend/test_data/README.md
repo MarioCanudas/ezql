@@ -1,6 +1,8 @@
 # Base de datos de prueba (SQLite)
 
-Este proyecto incluye una base de datos SQLite de ejemplo para probar EzQL sin subir datos propios.
+Este proyecto incluye el dataset de ejemplo (`netflix_titles.csv`), pero por seguridad el archivo SQLite (`netflix.db`) **no se versiona / no se sube al repositorio** (los `*.db` están ignorados en `.gitignore`).
+
+Para usar la opción **“Usar base de prueba Netflix”** debes generar `frontend/test_data/netflix.db` en tu máquina.
 
 ## ✅ Nombre y ubicación esperados
 
@@ -21,11 +23,11 @@ Si eliminas o renombras el archivo, el backend mostrará un error indicando que 
 
 ## ✅ ¿Necesito crearla manualmente?
 
-No. La base ya viene incluida en el repositorio.
+Sí — al menos **una vez** (o cada vez que borres el archivo).
 
-Solo asegúrate de **no cambiarle el nombre ni la ruta**.
+La buena noticia: como `*.db` está ignorado, puedes mantener `netflix.db` en tu máquina sin riesgo de subirlo por accidente.
 
-Si necesitas regenerarla desde cero, usa las instrucciones siguientes.
+Para crearla/regenerarla desde cero, usa las instrucciones siguientes.
 
 ---
 

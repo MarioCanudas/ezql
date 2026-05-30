@@ -60,58 +60,169 @@ ezql/
 
 ---
 
-## Getting Started
+## Desarrollo local (configuración y ejecución)
 
-### 1. Install dependencies
+> Ejecuta todos los comandos desde la raíz del repo (donde están `pyproject.toml` y `uv.lock`).
+
+### Requisitos
+
+- [uv](https://docs.astral.sh/uv/) (gestiona Python + dependencias)
+- (Opcional) `sqlite3` CLI si quieres generar la base de prueba (`frontend/test_data/netflix.db`).
+
+> Python requerido por el proyecto: `>=3.13` (uv lo gestiona automáticamente).
+
+### 1) Instalar dependencias
 
 ```bash
 uv sync
 ```
 
-### 2. Configure environment
+### 2) Configuración (URLs y proveedores de modelos)
 
-Model API keys are configured per user in the Streamlit profile/settings screen. The backend no longer requires global OpenAI or DeepSeek API keys.
+#### Frontend → Backend (API base URL)
 
-DeepSeek is used through LangChain's OpenAI-compatible chat client with the default base URL `https://api.deepseek.com`. Administrators can override provider base URLs when needed:
+Por defecto el frontend llama a `http://localhost:8000/api/v1`.
+
+Si tu backend corre en otra URL/puerto, puedes configurarlo de dos formas:
+
+1) **Streamlit secrets (recomendado):** crea/edita `frontend/.streamlit/secrets.toml` (no se sube al repo):
+
+```toml
+API_BASE_URL = "http://localhost:8000/api/v1"
+```
+
+2) **Variable de entorno al ejecutar Streamlit:**
+
+```bash
+export EZQL_API_BASE_URL="http://localhost:8000/api/v1"
+```
+
+#### Backend → Proveedor LLM (base URLs)
+
+Las **API keys** (OpenAI / DeepSeek) se configuran **por usuario dentro de la UI** (pantalla **Configuración → Perfil**) y se guardan localmente en la base interna de EzQL.
+
+Si necesitas apuntar a un endpoint OpenAI-compatible o cambiar el base URL de DeepSeek, usa variables de entorno (el backend también intenta cargar `frontend/.env` si existe):
 
 ```bash
 export OPENAI_BASE_URL="https://your-openai-compatible-endpoint/v1"
 export DEEPSEEK_BASE_URL="https://api.deepseek.com"
 ```
 
-Frontend (optional overrides):
+Opcionalmente puedes crear `frontend/.env` (no se sube al repo) con esas variables:
 
 ```bash
-export EZQL_API_BASE_URL="http://localhost:8000/api/v1"
+# frontend/.env
+OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-You can also set a Streamlit secret:
+### 3) Bases de datos (muy importante)
 
-```toml
-# .streamlit/secrets.toml
-API_BASE_URL = "http://localhost:8000/api/v1"
-```
+EzQL usa **dos tipos** de base de datos cuando lo corres en local:
 
-### 3. Initialize the database
+#### A) Base interna de EzQL (persistencia de la app)
+
+- Archivo: `backend/ezql.db` (SQLite)
+- Contiene: usuarios, chats, mensajes, modelos/engines disponibles, etc.
+- Se crea/migra automáticamente al arrancar el backend.
+- Por seguridad **no se versiona** (`*.db` está en `.gitignore`).
+- Reset rápido: borra `backend/ezql.db` y vuelve a arrancar (perderás usuarios/chats locales).
+
+> (Opcional) También puedes inicializarla manualmente:
+>
+> ```bash
+> uv run python backend/init_db.py
+> ```
+
+#### B) Base de datos que vas a analizar (tus datos)
+
+En el MVP, EzQL analiza bases **SQLite** (`.db`, `.sqlite`, `.sqlite3`).
+
+- En **Chats → Nuevo chat** puedes:
+  - **Subir un archivo SQLite** (se guarda como base **temporal**, solo vive durante el runtime actual del backend).
+  - Usar la **base de prueba Netflix**.
+- Si reinicias el backend, tendrás que volver a cargar el archivo y recrear el chat (esto es intencional).
+
+##### Base de prueba “Netflix” (no se sube al repo)
+
+Por seguridad, el archivo `frontend/test_data/netflix.db` **no se versiona**. El repo incluye el dataset `frontend/test_data/netflix_titles.csv`.
+
+Para generar la base de prueba:
 
 ```bash
-uv run python backend/init_db.py
+cd frontend/test_data
+sqlite3 netflix.db
 ```
 
-### 4. Run the backend
+Luego, dentro del prompt de `sqlite3`, ejecuta:
+
+```sql
+CREATE TABLE netflix_titles (
+    show_id TEXT PRIMARY KEY,
+    type TEXT,
+    title TEXT,
+    director TEXT,
+    "cast" TEXT,
+    country TEXT,
+    date_added TEXT,
+    release_year INTEGER,
+    rating TEXT,
+    duration TEXT,
+    listed_in TEXT,
+    description TEXT
+);
+.mode csv
+.import netflix_titles.csv netflix_titles
+```
+
+(Referencia completa: `frontend/test_data/README.md`.)
+
+### 4) Arrancar la app
+
+#### Opción A — Dos terminales (recomendado, cross-platform)
+
+Terminal 1 (backend):
 
 ```bash
-uv run fastapi dev backend/main.py
+uv run fastapi dev backend/main.py --host 127.0.0.1 --port 8000
 ```
 
-### 5. Run the frontend
+Terminal 2 (frontend):
 
 ```bash
 uv run streamlit run frontend/app.py
 ```
 
-### 6. Run both with poethepoet
+URLs útiles:
+
+- Frontend (Streamlit): `http://localhost:8501`
+- API docs (FastAPI): `http://localhost:8000/docs`
+
+#### Opción B — Un solo comando (macOS/Linux)
 
 ```bash
 uv run poe run-app
+```
+
+> Nota: esta tarea usa `lsof`/`kill` para liberar el puerto 8000. En Windows es mejor usar la opción de dos terminales.
+
+### 5) Primer uso (paso a paso)
+
+1. Abre el frontend en `http://localhost:8501`.
+2. Crea el primer usuario (botón **Crear usuario**) e inicia sesión.
+3. Ve a **Configuración → Perfil** y configura tu API key (OpenAI o DeepSeek).
+4. Ve a **Chats → Nuevo chat** y elige:
+   - **Usar base de prueba Netflix** (requiere `frontend/test_data/netflix.db`), o
+   - **Subir archivo SQLite .db** (tu propia base).
+
+### 6) Apagar la app
+
+- Si la ejecutas en dos terminales: `Ctrl + C` en cada una.
+- Si usas `poe run-app`: `Ctrl + C` una vez (Streamlit se detiene y el script mata el backend).
+
+Si algún puerto queda ocupado (macOS/Linux):
+
+```bash
+lsof -ti tcp:8000 | xargs kill
+lsof -ti tcp:8501 | xargs kill
 ```
