@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from backend.routers import api_router
-from backend.services import DBConnectionService
+from backend.services import DBConnectionService, UserDatabaseService
 
 ENV_PATH = Path(__file__).resolve().parents[1] / "frontend" / ".env"
 load_dotenv(ENV_PATH)
@@ -14,17 +14,20 @@ load_dotenv(ENV_PATH)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db_service = DBConnectionService()
+    user_database_service = UserDatabaseService()
 
     try:
         print("Connecting to the database...")
         db_service.connect()
         app.state.db_service = db_service
+        app.state.user_database_service = user_database_service
         print("Database connection established.")
         yield
     except Exception as e:
         print(f"Error during database connection: {e}")
     finally:
         print("Disconnecting from the database...")
+        user_database_service.close()
         db_service.disconnect()
         print("Database connection closed.")
 

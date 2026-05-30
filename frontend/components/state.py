@@ -10,6 +10,7 @@ def init_state() -> None:
     st.session_state.setdefault("current_user_id", None)
     st.session_state.setdefault("selected_user_id", None)
     st.session_state.setdefault("selected_db_id", None)
+    st.session_state.setdefault("selected_runtime_db_id", None)
     st.session_state.setdefault("selected_model_id", None)
     st.session_state.setdefault("selected_chat_id", None)
     st.session_state.setdefault("chat_messages", [])
@@ -20,6 +21,7 @@ def set_current_user(user_id: int | None) -> None:
         st.session_state[key] = user_id
     st.session_state["logged_in"] = user_id is not None
     st.session_state["selected_db_id"] = None
+    st.session_state["selected_runtime_db_id"] = None
     st.session_state["selected_chat_id"] = None
     st.session_state["chat_messages"] = []
 
@@ -44,6 +46,7 @@ def logout() -> None:
     for key in _CURRENT_USER_KEYS:
         st.session_state[key] = None
     st.session_state["selected_db_id"] = None
+    st.session_state["selected_runtime_db_id"] = None
     st.session_state["selected_model_id"] = None
     st.session_state["selected_chat_id"] = None
     st.session_state["chat_messages"] = []

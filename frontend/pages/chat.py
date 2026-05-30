@@ -37,6 +37,7 @@ def render(chat_id: int | None = None) -> None:
     try:
         databases = api_client.list_databases(user_id=user["id"])
         chats = api_client.list_chats(user_id=user["id"])
+        runtime_databases = api_client.list_runtime_databases(user_id=user["id"])
     except api_client.ApiError as exc:
         st.error(str(exc))
         return
@@ -49,6 +50,25 @@ def render(chat_id: int | None = None) -> None:
     st.title("Chat")
     active_title = _active_chat_title(chats, chat_id)
     st.caption(active_title or "Crea un chat para empezar a analizar tus datos.")
+    st.info(
+        "Las bases SQLite cargadas son temporales. Si el servidor o la sesión se reinicia, tendrás que volver a crear el chat subiendo la base otra vez.",
+        icon=":material/info:",
+    )
+    st.caption(
+        "Nota: por ahora las respuestas se entregan en texto o tablas. Las gráficas todavía no están disponibles."
+    )
+
+    active_chat = next((chat for chat in chats if chat["id"] == chat_id), None)
+    runtime_db_ids = {db["id"] for db in runtime_databases}
+    runtime_db_missing = False
+    if active_chat and active_chat.get("runtime_db_id"):
+        runtime_db_missing = active_chat["runtime_db_id"] not in runtime_db_ids
+        if runtime_db_missing:
+            st.warning(
+                "Este chat usa una base temporal que ya no está cargada. "
+                "Vuelve a crear el chat y sube la base SQLite nuevamente para continuar.",
+                icon=":material/warning:",
+            )
 
     if st.button("Configurar chat", type="primary"):
         chat_settings_dialog(chats=chats, databases=databases, models=models)
@@ -72,7 +92,9 @@ def render(chat_id: int | None = None) -> None:
     st.session_state["chat_messages"] = messages
     ui.render_chat_messages(messages)
 
-    if prompt := st.chat_input("Escribe tu pregunta sobre los datos"):
+    if prompt := st.chat_input(
+        "Escribe tu pregunta sobre los datos", disabled=runtime_db_missing
+    ):
         with st.status("Analizando tu consulta...", expanded=False):
             try:
                 response = api_client.create_reply(

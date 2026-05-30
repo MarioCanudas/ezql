@@ -6,7 +6,8 @@ from sqlmodel import Field, SQLModel
 class ChatBase(SQLModel):
     title: str = Field(default="New Chat", max_length=50)
     user_id: int = Field(foreign_key="users.id", index=True)
-    db_id: int = Field(foreign_key="databases.id", index=True)
+    db_id: int | None = Field(default=None, foreign_key="databases.id", index=True)
+    runtime_db_id: str | None = Field(default=None, index=True)
     model_id: int = Field(foreign_key="models.id", index=True)
     summary: str | None = Field(default=None)
 

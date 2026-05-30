@@ -59,18 +59,88 @@ class DBConnectionService:
             return
 
         inspector = inspect(self.engine)
-        if "users" not in inspector.get_table_names():
+        table_names = set(inspector.get_table_names())
+
+        if "users" in table_names:
+            existing_columns = {
+                column["name"] for column in inspector.get_columns("users")
+            }
+            migrations = {
+                "openai_api_key": "ALTER TABLE users ADD COLUMN openai_api_key VARCHAR",
+                "deepseek_api_key": "ALTER TABLE users ADD COLUMN deepseek_api_key VARCHAR",
+            }
+            with self.engine.begin() as connection:
+                for column_name, statement in migrations.items():
+                    if column_name not in existing_columns:
+                        connection.execute(text(statement))
+
+        if "chats" not in table_names:
             return
 
-        existing_columns = {column["name"] for column in inspector.get_columns("users")}
-        migrations = {
-            "openai_api_key": "ALTER TABLE users ADD COLUMN openai_api_key VARCHAR",
-            "deepseek_api_key": "ALTER TABLE users ADD COLUMN deepseek_api_key VARCHAR",
-        }
+        chat_columns = inspector.get_columns("chats")
+        chat_column_names = {column["name"] for column in chat_columns}
         with self.engine.begin() as connection:
-            for column_name, statement in migrations.items():
-                if column_name not in existing_columns:
-                    connection.execute(text(statement))
+            if "runtime_db_id" not in chat_column_names:
+                connection.execute(
+                    text("ALTER TABLE chats ADD COLUMN runtime_db_id VARCHAR")
+                )
+
+        refreshed_columns = inspect(self.engine).get_columns("chats")
+        db_id_column = next(
+            (column for column in refreshed_columns if column["name"] == "db_id"),
+            None,
+        )
+        if db_id_column is not None and not bool(db_id_column.get("nullable", True)):
+            self._rebuild_chats_table_with_nullable_db_id()
+
+    def _rebuild_chats_table_with_nullable_db_id(self) -> None:
+        if self.engine is None:
+            return
+
+        with self.engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                text(
+                    "CREATE TABLE chats_new ("
+                    "title VARCHAR(50) NOT NULL, "
+                    "user_id INTEGER NOT NULL, "
+                    "db_id INTEGER, "
+                    "runtime_db_id VARCHAR, "
+                    "model_id INTEGER NOT NULL, "
+                    "summary VARCHAR, "
+                    "id INTEGER NOT NULL, "
+                    "PRIMARY KEY (id), "
+                    "FOREIGN KEY(user_id) REFERENCES users (id), "
+                    "FOREIGN KEY(db_id) REFERENCES databases (id), "
+                    "FOREIGN KEY(model_id) REFERENCES models (id)"
+                    ")"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO chats_new "
+                    "(title, user_id, db_id, runtime_db_id, model_id, summary, id) "
+                    "SELECT title, user_id, db_id, runtime_db_id, model_id, summary, id "
+                    "FROM chats"
+                )
+            )
+            connection.execute(text("DROP TABLE chats"))
+            connection.execute(text("ALTER TABLE chats_new RENAME TO chats"))
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_chats_db_id ON chats (db_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_chats_user_id ON chats (user_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_chats_model_id ON chats (model_id)")
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_chats_runtime_db_id ON chats (runtime_db_id)"
+                )
+            )
+            connection.execute(text("PRAGMA foreign_keys=ON"))
 
     def _seed_supported_records(self) -> None:
         if self.engine is None:
@@ -87,7 +157,12 @@ class DBConnectionService:
                     Engines(
                         name="SQLite3",
                         is_supported=True,
-                        agent_context="Usa sintaxis compatible con SQLite.",
+                        agent_context=(
+                            "Motor SQLite. Usa solo consultas SELECT o WITH. "
+                            "Usa comillas dobles para identificadores con espacios. "
+                            "No uses ILIKE, DATE_TRUNC, EXTRACT ni STRING_AGG. "
+                            "Para concatenar texto usa || y para condicionales usa CASE WHEN."
+                        ),
                     )
                 )
 

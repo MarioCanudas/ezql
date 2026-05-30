@@ -24,7 +24,13 @@ from backend.services.llm_chat_service import (
     LLMGenerationError,
     resolve_llm_provider,
 )
-from backend.utils.dependencies import get_session
+from backend.services.sql_agent_service import SQLAgentService
+from backend.services.user_database_service import (
+    RuntimeDatabaseError,
+    RuntimeDatabaseNotFoundError,
+    UserDatabaseService,
+)
+from backend.utils.dependencies import get_runtime_database_service, get_session
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -93,19 +99,48 @@ def list_chats(
     summary="Create chat",
     description="Create a chat linked to a user, database, and model.",
 )
-def create_chat(payload: ChatCreate, session: Session = Depends(get_session)):
+def create_chat(
+    payload: ChatCreate,
+    session: Session = Depends(get_session),
+    runtime_database_service: UserDatabaseService = Depends(
+        get_runtime_database_service
+    ),
+):
     user = session.get(Users, payload.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    db = session.get(Databases, payload.db_id)
-    if not db:
-        raise HTTPException(status_code=404, detail="Database not found.")
-    if db.user_id != payload.user_id:
+    if payload.db_id is None and payload.runtime_db_id is None:
         raise HTTPException(
             status_code=400,
-            detail="Database does not belong to the selected user.",
+            detail="Selecciona una base de datos para crear el chat.",
         )
+    if payload.db_id is not None and payload.runtime_db_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Selecciona solo una base de datos para crear el chat.",
+        )
+
+    if payload.db_id is not None:
+        db = session.get(Databases, payload.db_id)
+        if not db:
+            raise HTTPException(status_code=404, detail="Database not found.")
+        if db.user_id != payload.user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Database does not belong to the selected user.",
+            )
+
+    if payload.runtime_db_id is not None:
+        try:
+            runtime_database_service.get_database(
+                payload.runtime_db_id,
+                user_id=payload.user_id,
+            )
+        except RuntimeDatabaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeDatabaseError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     model = session.get(Models, payload.model_id)
     if not model:
@@ -167,6 +202,9 @@ def generate_reply(
     chat_id: int,
     payload: ChatReplyRequest,
     session: Session = Depends(get_session),
+    runtime_database_service: UserDatabaseService = Depends(
+        get_runtime_database_service
+    ),
 ):
     chat = session.get(Chats, chat_id)
     if not chat:
@@ -210,21 +248,48 @@ def generate_reply(
         .order_by(col(Messages.sent_at).asc(), col(Messages.id).asc())
     ).all()
 
-    service = LLMChatService(
-        model_name=model.name,
-        provider=model.company,
-        api_key=api_key,
-    )
-    try:
-        assistant_text = service.generate_reply(history, summary=chat.summary)
-    except LLMConfigurationError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except LLMGenerationError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="The assistant could not generate a response. Please try again.",
-        ) from exc
-    assistant_content = Content(text=assistant_text, data=None)
+    summary_service: LLMChatService
+    if chat.runtime_db_id:
+        service = SQLAgentService(
+            database_service=runtime_database_service,
+            model_name=model.name,
+            provider=model.company,
+            api_key=api_key,
+        )
+        summary_service = service.llm_service
+        try:
+            agent_reply = service.generate_reply(
+                user_message=payload.content.text,
+                history=history,
+                summary=chat.summary,
+                runtime_db_id=chat.runtime_db_id,
+                user_id=chat.user_id,
+            )
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except LLMGenerationError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="The assistant could not generate a response. Please try again.",
+            ) from exc
+        assistant_content = Content(text=agent_reply.text, data=agent_reply.data)
+    else:
+        service = LLMChatService(
+            model_name=model.name,
+            provider=model.company,
+            api_key=api_key,
+        )
+        summary_service = service
+        try:
+            assistant_text = service.generate_reply(history, summary=chat.summary)
+        except LLMConfigurationError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except LLMGenerationError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="The assistant could not generate a response. Please try again.",
+            ) from exc
+        assistant_content = Content(text=assistant_text, data=None)
 
     assistant_message = Messages(
         chat_id=chat_id,
@@ -237,7 +302,7 @@ def generate_reply(
 
     updated_history = [*history, assistant_message]
     try:
-        chat.summary = service.summarize_chat(
+        chat.summary = summary_service.summarize_chat(
             updated_history,
             current_summary=chat.summary,
         )

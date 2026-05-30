@@ -35,6 +35,20 @@ def get_client(base_url: str) -> httpx.Client:
     return httpx.Client(base_url=base_url, timeout=30.0)
 
 
+def _handle_response(response: httpx.Response) -> Any:
+    if response.status_code >= 400:
+        detail = f"Request failed ({response.status_code})."
+        try:
+            payload = response.json()
+            detail = payload.get("detail") or payload.get("message") or detail
+        except ValueError:
+            pass
+        raise ApiError(detail)
+    if response.status_code == 204:
+        return None
+    return response.json()
+
+
 def _request(
     method: str,
     path: str,
@@ -54,17 +68,29 @@ def _request(
         raise ApiError(
             "Error de red al llamar al backend. Verifica la URL configurada."
         ) from exc
-    if response.status_code >= 400:
-        detail = f"Request failed ({response.status_code})."
-        try:
-            payload = response.json()
-            detail = payload.get("detail") or payload.get("message") or detail
-        except ValueError:
-            pass
-        raise ApiError(detail)
-    if response.status_code == 204:
-        return None
-    return response.json()
+    return _handle_response(response)
+
+
+def _request_multipart(
+    method: str,
+    path: str,
+    *,
+    data: dict[str, Any],
+    files: dict[str, Any] | None = None,
+) -> Any:
+    client = get_client(_base_url())
+    try:
+        response = client.request(method, path, data=data, files=files)
+    except httpx.ConnectError as exc:
+        raise ApiError(
+            "No se pudo conectar con el backend. Verifica que FastAPI este "
+            "ejecutandose y que API_BASE_URL en secrets.toml sea correcto."
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ApiError(
+            "Error de red al llamar al backend. Verifica la URL configurada."
+        ) from exc
+    return _handle_response(response)
 
 
 @st.cache_data(ttl=5)
@@ -204,8 +230,9 @@ def create_chat(
     *,
     title: str,
     user_id: int,
-    db_id: int,
     model_id: int,
+    db_id: int | None = None,
+    runtime_db_id: str | None = None,
 ) -> dict[str, Any]:
     return _request(
         "POST",
@@ -214,8 +241,48 @@ def create_chat(
             "title": title,
             "user_id": user_id,
             "db_id": db_id,
+            "runtime_db_id": runtime_db_id,
             "model_id": model_id,
         },
+    )
+
+
+@st.cache_data(ttl=5)
+def list_runtime_databases(user_id: int | None = None) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {}
+    if user_id is not None:
+        params["user_id"] = user_id
+    return _request("GET", "/runtime-databases", params=params)
+
+
+def register_sample_database(*, user_id: int) -> dict[str, Any]:
+    return _request_multipart(
+        "POST",
+        "/runtime-databases/sample",
+        data={"user_id": str(user_id)},
+    )
+
+
+def upload_runtime_database(
+    *,
+    user_id: int,
+    display_name: str,
+    filename: str,
+    content: bytes,
+) -> dict[str, Any]:
+    return _request_multipart(
+        "POST",
+        "/runtime-databases/upload",
+        data={"user_id": str(user_id), "display_name": display_name},
+        files={"file": (filename, content, "application/octet-stream")},
+    )
+
+
+def get_runtime_database_schema(*, runtime_db_id: str, user_id: int) -> dict[str, Any]:
+    return _request(
+        "GET",
+        f"/runtime-databases/{runtime_db_id}/schema",
+        params={"user_id": user_id},
     )
 
 
