@@ -4,14 +4,18 @@ import shutil
 import sqlite3
 import tempfile
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 from pydantic import JsonValue
 
-from backend.models import QueryResult, RuntimeColumn, RuntimeDatabaseRead, RuntimeTable
+from backend.models import (
+    QueryResult,
+    RuntimeColumn,
+    RuntimeDatabaseInternal,
+    RuntimeDatabaseRead,
+    RuntimeTable,
+)
 from backend.services.sql_safety import limit_readonly_sql, quote_identifier
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -29,22 +33,11 @@ class RuntimeDatabaseNotFoundError(RuntimeDatabaseError):
     pass
 
 
-@dataclass(frozen=True)
-class _RuntimeDatabase:
-    id: str
-    user_id: int
-    name: str
-    path: Path
-    source: Literal["upload", "sample"]
-    created_at: datetime
-    delete_on_close: bool = False
-
-
 class UserDatabaseService:
     def __init__(self, *, temp_root: Path | None = None) -> None:
         self._temp_root = temp_root or Path(tempfile.mkdtemp(prefix="ezql_uploads_"))
         self._temp_root.mkdir(parents=True, exist_ok=True)
-        self._databases: dict[str, _RuntimeDatabase] = {}
+        self._databases: dict[str, RuntimeDatabaseInternal] = {}
         self._sample_path = (
             Path(__file__).resolve().parents[2]
             / "frontend"
@@ -64,7 +57,7 @@ class UserDatabaseService:
         if not self._sample_path.exists():
             raise RuntimeDatabaseError("La base de prueba no está disponible.")
 
-        database = _RuntimeDatabase(
+        database = RuntimeDatabaseInternal(
             id=str(uuid.uuid4()),
             user_id=user_id,
             name="Base de prueba Netflix",
@@ -107,7 +100,7 @@ class UserDatabaseService:
             path.unlink(missing_ok=True)
             raise
 
-        database = _RuntimeDatabase(
+        database = RuntimeDatabaseInternal(
             id=runtime_id,
             user_id=user_id,
             name=display_name.strip() or Path(filename).stem or "Base SQLite",
@@ -137,7 +130,7 @@ class UserDatabaseService:
 
     def get_database(
         self, database_id: str, *, user_id: int | None = None
-    ) -> _RuntimeDatabase:
+    ) -> RuntimeDatabaseInternal:
         database = self._databases.get(database_id)
         if database is None:
             raise RuntimeDatabaseNotFoundError(
@@ -308,7 +301,7 @@ class UserDatabaseService:
             truncated=truncated,
         )
 
-    def _to_read(self, database: _RuntimeDatabase) -> RuntimeDatabaseRead:
+    def _to_read(self, database: RuntimeDatabaseInternal) -> RuntimeDatabaseRead:
         return RuntimeDatabaseRead(
             id=database.id,
             user_id=database.user_id,

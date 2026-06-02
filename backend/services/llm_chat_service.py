@@ -1,32 +1,12 @@
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from pydantic import SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 
-from backend.models import Content, Messages, Role
-
-DEFAULT_SYSTEM_PROMPT = (
-    "Eres un analista de datos para usuarios de negocio. Responde en espanol claro "
-    "y directo. No muestres SQL, codigo ni detalles tecnicos del modelo. Si falta "
-    "informacion, haz una pregunta breve para aclarar."
-)
-
-SUMMARY_SYSTEM_PROMPT = (
-    "Resume la conversacion para que otro analista pueda continuarla con memoria. "
-    "Conserva objetivos del usuario, decisiones, filtros, metricas, entidades, "
-    "periodos de tiempo y conclusiones importantes. No incluyas SQL, codigo ni "
-    "detalles tecnicos. Maximo 150 palabras."
-)
-
-
-@dataclass(frozen=True)
-class LLMProviderConfig:
-    name: str
-    default_base_url: str | None = None
-    base_url_env: str | None = None
+from backend.models import Content, LLMProviderConfig, Messages, Role
+from backend.prompts import DEFAULT_SYSTEM_PROMPT, SUMMARY_SYSTEM_PROMPT
 
 
 class LLMConfigurationError(RuntimeError):
@@ -71,8 +51,9 @@ def resolve_llm_provider(provider: str | None, model_name: str) -> str:
     return "openai"
 
 
-@dataclass(frozen=True)
-class LLMChatService:
+class LLMChatService(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     model_name: str
     provider: str | None = None
     api_key: str | None = None

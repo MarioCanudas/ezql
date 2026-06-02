@@ -1,6 +1,8 @@
+from .agents import AgentReply
 from .chats import ChatBase, ChatCreate, ChatRead, Chats, ChatSummary, ChatUpdate
 from .databases import DatabaseBase, DatabaseCreate, DatabaseRead, Databases
 from .engines import EngineBase, EngineCreate, EngineRead, Engines
+from .llm import LLMProviderConfig
 from .messages import (
     ChatReplyRequest,
     ChatReplyResponse,
@@ -16,6 +18,7 @@ from .models import ModelBase, ModelCreate, ModelRead, Models
 from .runtime_databases import (
     QueryResult,
     RuntimeColumn,
+    RuntimeDatabaseInternal,
     RuntimeDatabaseRead,
     RuntimeDatabaseSchema,
     RuntimeTable,
@@ -31,6 +34,7 @@ from .users import (
 )
 
 __all__ = [
+    "AgentReply",
     "ChatBase",
     "ChatCreate",
     "ChatRead",
@@ -45,6 +49,7 @@ __all__ = [
     "EngineCreate",
     "EngineRead",
     "Engines",
+    "LLMProviderConfig",
     "Content",
     "ChatReplyRequest",
     "ChatReplyResponse",
@@ -60,6 +65,7 @@ __all__ = [
     "Models",
     "QueryResult",
     "RuntimeColumn",
+    "RuntimeDatabaseInternal",
     "RuntimeDatabaseRead",
     "RuntimeDatabaseSchema",
     "RuntimeTable",
