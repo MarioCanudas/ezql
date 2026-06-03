@@ -301,3 +301,8 @@ def create_reply(
         "user_id": user_id,
     }
     return _request("POST", f"/chats/{chat_id}/reply", json=payload)
+
+
+def delete_chat(chat_id: int) -> None:
+    _request("DELETE", f"/chats/{chat_id}")
+    list_chats.clear()

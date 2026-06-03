@@ -10,6 +10,7 @@ def chat_settings_dialog(
     chats: list[dict[str, Any]],
     databases: list[dict[str, Any]],
     models: list[dict[str, Any]],
+    active_chat_id: int | None = None,
 ) -> None:
     st.caption("Cambia la conversación activa y el contexto para crear nuevos chats.")
 
@@ -55,6 +56,15 @@ def chat_settings_dialog(
             st.info("Agrega un modelo para crear chats.")
 
         submitted = st.form_submit_button("Guardar", type="primary")
+
+    if active_chat_id:
+        st.divider()
+        st.write("### Opciones del chat")
+        if st.button("Eliminar chat actual", type="secondary", icon=":material/delete:"):
+            from components import api_client
+            api_client.delete_chat(active_chat_id)
+            st.session_state.pop("selected_chat_id", None)
+            st.rerun()
 
     if not submitted:
         return

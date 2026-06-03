@@ -71,7 +71,9 @@ def render(chat_id: int | None = None) -> None:
             )
 
     if st.button("Configurar chat", type="primary"):
-        chat_settings_dialog(chats=chats, databases=databases, models=models)
+        chat_settings_dialog(
+            chats=chats, databases=databases, models=models, active_chat_id=chat_id
+        )
 
     st.divider()
 
