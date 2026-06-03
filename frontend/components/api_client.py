@@ -306,3 +306,19 @@ def create_reply(
 def delete_chat(chat_id: int) -> None:
     _request("DELETE", f"/chats/{chat_id}")
     list_chats.clear()
+
+
+def update_chat(
+    chat_id: int,
+    *,
+    title: str | None = None,
+    summary: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if title is not None:
+        payload["title"] = title
+    if summary is not None:
+        payload["summary"] = summary
+    res = _request("PATCH", f"/chats/{chat_id}", json=payload)
+    list_chats.clear()
+    return res
