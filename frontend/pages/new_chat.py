@@ -23,6 +23,7 @@ def _finish_chat_creation(
     st.session_state["selected_runtime_db_id"] = runtime_db_id
     st.session_state["selected_model_id"] = model_id
     st.session_state["chat_messages"] = []
+    st.session_state["nav_to_path"] = f"chat-{chat['id']}"
     st.success("Chat creado. Ya puedes preguntar por la base seleccionada.")
     st.rerun()
 

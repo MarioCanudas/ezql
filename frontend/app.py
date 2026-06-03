@@ -141,4 +141,15 @@ page = st.navigation(
     pages,
     position="sidebar" if st.session_state.logged_in else "hidden",
 )
+
+if "nav_to_chat_id" in st.session_state:
+    st.session_state["nav_to_path"] = f"chat-{st.session_state.pop('nav_to_chat_id')}"
+
+if "nav_to_path" in st.session_state:
+    target_path = st.session_state.pop("nav_to_path")
+    for section_pages in pages.values():
+        for p in section_pages:
+            if getattr(p, "url_path", "") == target_path:
+                st.switch_page(p)
+
 page.run()

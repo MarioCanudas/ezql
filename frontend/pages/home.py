@@ -2,7 +2,6 @@ from typing import Any
 
 import streamlit as st
 from components import api_client, state, ui
-from dialogs.chat_dialog import create_chat_dialog
 from dialogs.database_dialog import create_database_dialog
 from dialogs.profile_dialog import profile_dialog
 
@@ -70,18 +69,8 @@ def render() -> None:
 
     actions = st.columns(3)
     if actions[0].button("Nuevo chat", type="primary", use_container_width=True):
-        try:
-            models = api_client.list_models()
-        except api_client.ApiError as exc:
-            st.error(str(exc))
-            return
-        create_chat_dialog(
-            user_id=user_id,
-            databases=databases,
-            models=models,
-            default_db_id=st.session_state.get("selected_db_id"),
-            default_model_id=st.session_state.get("selected_model_id"),
-        )
+        st.session_state["nav_to_path"] = "nuevo-chat"
+        st.rerun()
     if actions[1].button("Agregar base de datos", use_container_width=True):
         try:
             engines = api_client.list_engines()
