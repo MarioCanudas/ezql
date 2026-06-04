@@ -34,12 +34,14 @@ def _create_chat_with_runtime_db(
     title: str,
     model_id: int,
     runtime_db: dict[str, Any],
+    db_id: int | None = None,
 ) -> None:
     chat = api_client.create_chat(
         title=title.strip() or "Nuevo análisis",
         user_id=user_id,
         model_id=model_id,
         runtime_db_id=runtime_db["id"],
+        db_id=db_id,
     )
     _finish_chat_creation(chat, runtime_db_id=runtime_db["id"], model_id=model_id)
 
@@ -127,8 +129,23 @@ def render() -> None:
         return
 
     try:
+        db_id = None
         if source == "sample":
             runtime_db = api_client.register_sample_database(user_id=user_id)
+            try:
+                db_list = api_client.list_databases(user_id=user_id)
+                associated_db = next(
+                    (d for d in db_list if d.get("name", "").strip().casefold() in (
+                        "netflix titles",
+                        "netflix_titles",
+                        "base de prueba netflix",
+                    )),
+                    None
+                )
+                if associated_db:
+                    db_id = associated_db["id"]
+            except Exception:
+                pass
         else:
             if uploaded_file is None:
                 st.warning("Sube un archivo SQLite .db para crear el chat.")
@@ -145,6 +162,7 @@ def render() -> None:
             title=title,
             model_id=model_id,
             runtime_db=runtime_db,
+            db_id=db_id,
         )
     except api_client.ApiError as exc:
         st.error(str(exc))

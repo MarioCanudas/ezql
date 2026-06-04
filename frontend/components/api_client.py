@@ -255,11 +255,18 @@ def list_runtime_databases(user_id: int | None = None) -> list[dict[str, Any]]:
     return _request("GET", "/runtime-databases", params=params)
 
 
-def register_sample_database(*, user_id: int) -> dict[str, Any]:
+def register_sample_database(
+    *,
+    user_id: int,
+    runtime_id: str | None = None,
+) -> dict[str, Any]:
+    data = {"user_id": str(user_id)}
+    if runtime_id is not None:
+        data["runtime_id"] = runtime_id
     return _request_multipart(
         "POST",
         "/runtime-databases/sample",
-        data={"user_id": str(user_id)},
+        data=data,
     )
 
 
@@ -269,11 +276,15 @@ def upload_runtime_database(
     display_name: str,
     filename: str,
     content: bytes,
+    runtime_id: str | None = None,
 ) -> dict[str, Any]:
+    data = {"user_id": str(user_id), "display_name": display_name}
+    if runtime_id is not None:
+        data["runtime_id"] = runtime_id
     return _request_multipart(
         "POST",
         "/runtime-databases/upload",
-        data={"user_id": str(user_id), "display_name": display_name},
+        data=data,
         files={"file": (filename, content, "application/octet-stream")},
     )
 
@@ -313,12 +324,18 @@ def update_chat(
     *,
     title: str | None = None,
     summary: str | None = None,
+    runtime_db_id: str | None = None,
+    db_id: int | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if title is not None:
         payload["title"] = title
     if summary is not None:
         payload["summary"] = summary
+    if runtime_db_id is not None:
+        payload["runtime_db_id"] = runtime_db_id
+    if db_id is not None:
+        payload["db_id"] = db_id
     res = _request("PATCH", f"/chats/{chat_id}", json=payload)
     list_chats.clear()
     return res

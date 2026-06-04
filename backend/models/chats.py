@@ -19,6 +19,8 @@ class ChatCreate(ChatBase):
 class ChatUpdate(SQLModel):
     title: str | None = Field(default=None, max_length=50)
     summary: str | None = Field(default=None)
+    runtime_db_id: str | None = Field(default=None)
+    db_id: int | None = Field(default=None)
 
 
 class ChatRead(ChatBase):

@@ -43,10 +43,11 @@ def list_runtime_databases(
 )
 def register_sample_database(
     user_id: int = Form(...),
+    runtime_id: str | None = Form(default=None),
     service: UserDatabaseService = Depends(get_runtime_database_service),
 ):
     try:
-        return service.register_sample_sqlite(user_id=user_id)
+        return service.register_sample_sqlite(user_id=user_id, runtime_id=runtime_id)
     except RuntimeDatabaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -62,6 +63,7 @@ async def upload_runtime_database(
     user_id: int = Form(...),
     display_name: str = Form(default=""),
     file: UploadFile = File(...),
+    runtime_id: str | None = Form(default=None),
     service: UserDatabaseService = Depends(get_runtime_database_service),
 ):
     content = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -71,6 +73,7 @@ async def upload_runtime_database(
             display_name=display_name,
             filename=file.filename or "database.db",
             content=content,
+            runtime_id=runtime_id,
         )
     except RuntimeDatabaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

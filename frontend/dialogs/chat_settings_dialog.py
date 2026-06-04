@@ -32,7 +32,9 @@ def chat_settings_dialog(
             db_map = {database["id"]: database["name"] for database in databases}
             db_options = list(db_map.keys())
             db_index = 0
-            if "selected_db_id" in st.session_state and st.session_state["selected_db_id"] in db_options:
+            if active_chat and active_chat.get("db_id") in db_options:
+                db_index = db_options.index(active_chat["db_id"])
+            elif "selected_db_id" in st.session_state and st.session_state["selected_db_id"] in db_options:
                 db_index = db_options.index(st.session_state["selected_db_id"])
 
             selected_db_id = st.selectbox(
@@ -67,21 +69,29 @@ def chat_settings_dialog(
         st.write("### Opciones del chat")
         if st.button("Eliminar chat actual", type="secondary", icon=":material/delete:"):
             from components import api_client
-            api_client.delete_chat(active_chat_id)
-            st.session_state.pop("selected_chat_id", None)
-            st.rerun()
+            if active_chat_id is not None:
+                api_client.delete_chat(active_chat_id)
+                st.session_state.pop("selected_chat_id", None)
+                st.rerun()
 
     if not submitted:
         return
 
     from components import api_client
 
-    if active_chat and new_title and new_title != active_chat.get("title"):
-        try:
-            api_client.update_chat(active_chat_id, title=new_title)
-        except api_client.ApiError as exc:
-            st.error(str(exc))
-            return
+    updates: dict[str, Any] = {}
+    if active_chat:
+        if new_title and new_title != active_chat.get("title"):
+            updates["title"] = new_title
+        if selected_db_id is not None and selected_db_id != active_chat.get("db_id"):
+            updates["db_id"] = selected_db_id
+
+        if updates and active_chat_id is not None:
+            try:
+                api_client.update_chat(active_chat_id, **updates)
+            except api_client.ApiError as exc:
+                st.error(str(exc))
+                return
 
     if selected_db_id is not None:
         st.session_state["selected_db_id"] = selected_db_id

@@ -53,12 +53,17 @@ class UserDatabaseService:
         if self._temp_root.exists():
             shutil.rmtree(self._temp_root, ignore_errors=True)
 
-    def register_sample_sqlite(self, *, user_id: int) -> RuntimeDatabaseRead:
+    def register_sample_sqlite(
+        self,
+        *,
+        user_id: int,
+        runtime_id: str | None = None,
+    ) -> RuntimeDatabaseRead:
         if not self._sample_path.exists():
             raise RuntimeDatabaseError("La base de prueba no está disponible.")
 
         database = RuntimeDatabaseInternal(
-            id=str(uuid.uuid4()),
+            id=runtime_id or f"sample-{user_id}",
             user_id=user_id,
             name="Base de prueba Netflix",
             path=self._sample_path,
@@ -77,6 +82,7 @@ class UserDatabaseService:
         display_name: str,
         filename: str,
         content: bytes,
+        runtime_id: str | None = None,
     ) -> RuntimeDatabaseRead:
         suffix = Path(filename).suffix.casefold()
         if suffix not in _ALLOWED_EXTENSIONS:
@@ -90,7 +96,7 @@ class UserDatabaseService:
                 "El archivo supera el tamaño máximo permitido de 50 MB."
             )
 
-        runtime_id = str(uuid.uuid4())
+        runtime_id = runtime_id or str(uuid.uuid4())
         path = self._temp_root / f"{runtime_id}{suffix}"
         path.write_bytes(content)
 
