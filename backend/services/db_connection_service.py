@@ -93,6 +93,15 @@ class DBConnectionService:
         if db_id_column is not None and not bool(db_id_column.get("nullable", True)):
             self._rebuild_chats_table_with_nullable_db_id()
 
+        if "databases" in table_names:
+            db_columns = inspect(self.engine).get_columns("databases")
+            user_id_column = next(
+                (column for column in db_columns if column["name"] == "user_id"),
+                None,
+            )
+            if user_id_column is not None and not bool(user_id_column.get("nullable", True)):
+                self._rebuild_databases_table_with_nullable_user_id()
+
     def _rebuild_chats_table_with_nullable_db_id(self) -> None:
         if self.engine is None:
             return
@@ -139,6 +148,45 @@ class DBConnectionService:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_chats_runtime_db_id ON chats (runtime_db_id)"
                 )
+            )
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+
+    def _rebuild_databases_table_with_nullable_user_id(self) -> None:
+        if self.engine is None:
+            return
+
+        with self.engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                text(
+                    "CREATE TABLE databases_new ("
+                    "name VARCHAR(50) NOT NULL, "
+                    "user_id INTEGER, "
+                    "engine_id INTEGER NOT NULL, "
+                    "hashed_db_link VARCHAR NOT NULL, "
+                    "hashed_auth_token VARCHAR, "
+                    "id INTEGER NOT NULL, "
+                    "PRIMARY KEY (id), "
+                    "FOREIGN KEY(user_id) REFERENCES users (id), "
+                    "FOREIGN KEY(engine_id) REFERENCES engines (id)"
+                    ")"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO databases_new "
+                    "(name, user_id, engine_id, hashed_db_link, hashed_auth_token, id) "
+                    "SELECT name, user_id, engine_id, hashed_db_link, hashed_auth_token, id "
+                    "FROM databases"
+                )
+            )
+            connection.execute(text("DROP TABLE databases"))
+            connection.execute(text("ALTER TABLE databases_new RENAME TO databases"))
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_databases_user_id ON databases (user_id)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_databases_engine_id ON databases (engine_id)")
             )
             connection.execute(text("PRAGMA foreign_keys=ON"))
 

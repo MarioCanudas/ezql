@@ -23,7 +23,7 @@ def list_databases(
 ):
     stmt = select(Databases)
     if user_id is not None:
-        stmt = stmt.where(col(Databases.user_id) == user_id)
+        stmt = stmt.where((col(Databases.user_id) == user_id) | (col(Databases.user_id) == None))
     if engine_id is not None:
         stmt = stmt.where(col(Databases.engine_id) == engine_id)
 

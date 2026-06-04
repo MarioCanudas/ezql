@@ -125,7 +125,7 @@ def create_chat(
         db = session.get(Databases, payload.db_id)
         if not db:
             raise HTTPException(status_code=404, detail="Database not found.")
-        if db.user_id != payload.user_id:
+        if db.user_id is not None and db.user_id != payload.user_id:
             raise HTTPException(
                 status_code=400,
                 detail="Database does not belong to the selected user.",
