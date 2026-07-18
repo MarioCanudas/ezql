@@ -115,11 +115,6 @@ def create_chat(
             status_code=400,
             detail="Selecciona una base de datos para crear el chat.",
         )
-    if payload.db_id is not None and payload.runtime_db_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="Selecciona solo una base de datos para crear el chat.",
-        )
 
     if payload.db_id is not None:
         db = session.get(Databases, payload.db_id)
