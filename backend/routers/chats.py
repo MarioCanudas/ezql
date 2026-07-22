@@ -18,17 +18,17 @@ from backend.models import (
     Role,
     Users,
 )
-from backend.services.llm_chat_service import (
-    LLMChatService,
+from backend.services.agent.agent_chat import (
+    AgentChat,
     LLMConfigurationError,
     LLMGenerationError,
     resolve_llm_provider,
 )
-from backend.services.sql_agent_service import SQLAgentService
-from backend.services.user_database_service import (
+from backend.services.agent import SQLAgent
+from backend.services.user_database import (
     RuntimeDatabaseError,
     RuntimeDatabaseNotFoundError,
-    UserDatabaseService,
+    UserDatabase,
 )
 from backend.utils.dependencies import get_runtime_database_service, get_session
 
@@ -102,7 +102,7 @@ def list_chats(
 def create_chat(
     payload: ChatCreate,
     session: Session = Depends(get_session),
-    runtime_database_service: UserDatabaseService = Depends(
+    runtime_database_service: UserDatabase = Depends(
         get_runtime_database_service
     ),
 ):
@@ -127,15 +127,10 @@ def create_chat(
             )
 
     if payload.runtime_db_id is not None:
-        try:
-            runtime_database_service.get_database(
-                payload.runtime_db_id,
-                user_id=payload.user_id,
-            )
-        except RuntimeDatabaseNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except RuntimeDatabaseError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        runtime_database_service.get_database(
+            payload.runtime_db_id,
+            user_id=payload.user_id,
+        )
 
     model = session.get(Models, payload.model_id)
     if not model:
@@ -197,7 +192,7 @@ def generate_reply(
     chat_id: int,
     payload: ChatReplyRequest,
     session: Session = Depends(get_session),
-    runtime_database_service: UserDatabaseService = Depends(
+    runtime_database_service: UserDatabase = Depends(
         get_runtime_database_service
     ),
 ):
@@ -243,47 +238,31 @@ def generate_reply(
         .order_by(col(Messages.sent_at).asc(), col(Messages.id).asc())
     ).all()
 
-    summary_service: LLMChatService
+    summary_service: AgentChat
     if chat.runtime_db_id:
-        service = SQLAgentService(
+        service = SQLAgent(
             database_service=runtime_database_service,
             model_name=model.name,
             provider=model.company,
             api_key=api_key,
         )
         summary_service = service.llm_service
-        try:
-            agent_reply = service.generate_reply(
-                user_message=payload.content.text,
-                history=history,
-                summary=chat.summary,
-                runtime_db_id=chat.runtime_db_id,
-                user_id=chat.user_id,
-            )
-        except LLMConfigurationError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        except LLMGenerationError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail="The assistant could not generate a response. Please try again.",
-            ) from exc
+        agent_reply = service.generate_reply(
+            user_message=payload.content.text,
+            history=history,
+            summary=chat.summary,
+            runtime_db_id=chat.runtime_db_id,
+            user_id=chat.user_id,
+        )
         assistant_content = Content(text=agent_reply.text, data=agent_reply.data)
     else:
-        service = LLMChatService(
+        service = AgentChat(
             model_name=model.name,
             provider=model.company,
             api_key=api_key,
         )
         summary_service = service
-        try:
-            assistant_text = service.generate_reply(history, summary=chat.summary)
-        except LLMConfigurationError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        except LLMGenerationError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail="The assistant could not generate a response. Please try again.",
-            ) from exc
+        assistant_text = service.generate_reply(history, summary=chat.summary)
         assistant_content = Content(text=assistant_text, data=None)
 
     assistant_message = Messages(
@@ -296,15 +275,12 @@ def generate_reply(
     session.refresh(assistant_message)
 
     updated_history = [*history, assistant_message]
-    try:
-        chat.summary = summary_service.summarize_chat(
-            updated_history,
-            current_summary=chat.summary,
-        )
-        session.add(chat)
-        session.commit()
-    except LLMGenerationError:
-        session.rollback()
+    chat.summary = summary_service.summarize_chat(
+        updated_history,
+        current_summary=chat.summary,
+    )
+    session.add(chat)
+    session.commit()
 
     return ChatReplyResponse(
         user_message=_to_message_read(user_message),

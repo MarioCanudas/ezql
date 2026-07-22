@@ -2,10 +2,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from backend.routers import api_router
-from backend.services import DBConnectionService, UserDatabaseService
+from backend.services.user_database import RuntimeDatabaseError, RuntimeDatabaseNotFoundError
+from backend.services.agent.agent_chat import LLMConfigurationError, LLMGenerationError
+from backend.utils.dependencies import ServiceRegistry
 
 ENV_PATH = Path(__file__).resolve().parents[1] / "frontend" / ".env"
 load_dotenv(ENV_PATH)
@@ -13,23 +16,18 @@ load_dotenv(ENV_PATH)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db_service = DBConnectionService()
-    user_database_service = UserDatabaseService()
-
     try:
         print("Connecting to the database...")
-        db_service.connect()
-        app.state.db_service = db_service
-        app.state.user_database_service = user_database_service
+        ServiceRegistry.get_db_connection().connect()
+        ServiceRegistry.get_user_database()  # Initialize the registry instance
         print("Database connection established.")
         yield
     except Exception as e:
         print(f"Error during database connection: {e}")
     finally:
-        print("Disconnecting from the database...")
-        user_database_service.close()
-        db_service.disconnect()
-        print("Database connection closed.")
+        print("Cleaning up services...")
+        ServiceRegistry.clear()
+        print("Services cleanup complete.")
 
 
 tags_metadata = [
@@ -57,5 +55,33 @@ app = FastAPI(
     openapi_tags=tags_metadata,
     lifespan=lifespan,
 )
+
+@app.exception_handler(RuntimeDatabaseNotFoundError)
+async def runtime_database_not_found_handler(request: Request, exc: RuntimeDatabaseNotFoundError):
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={"detail": str(exc)},
+    )
+
+@app.exception_handler(RuntimeDatabaseError)
+async def runtime_database_error_handler(request: Request, exc: RuntimeDatabaseError):
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": str(exc)},
+    )
+
+@app.exception_handler(LLMConfigurationError)
+async def llm_configuration_error_handler(request: Request, exc: LLMConfigurationError):
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": str(exc)},
+    )
+
+@app.exception_handler(LLMGenerationError)
+async def llm_generation_error_handler(request: Request, exc: LLMGenerationError):
+    return JSONResponse(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        content={"detail": "The assistant could not generate a response. Please try again."},
+    )
 
 app.include_router(api_router, prefix="/api/v1")

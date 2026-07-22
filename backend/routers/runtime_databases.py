@@ -10,11 +10,11 @@ from fastapi import (
 )
 
 from backend.models import RuntimeDatabaseRead, RuntimeDatabaseSchema
-from backend.services.user_database_service import (
+from backend.services.user_database import (
     MAX_UPLOAD_BYTES,
     RuntimeDatabaseError,
     RuntimeDatabaseNotFoundError,
-    UserDatabaseService,
+    UserDatabase,
 )
 from backend.utils.dependencies import get_runtime_database_service
 
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/runtime-databases", tags=["databases"])
 )
 def list_runtime_databases(
     user_id: int | None = Query(default=None),
-    service: UserDatabaseService = Depends(get_runtime_database_service),
+    service: UserDatabase = Depends(get_runtime_database_service),
 ):
     return service.list_databases(user_id=user_id)
 
@@ -44,12 +44,9 @@ def list_runtime_databases(
 def register_sample_database(
     user_id: int = Form(...),
     runtime_id: str | None = Form(default=None),
-    service: UserDatabaseService = Depends(get_runtime_database_service),
+    service: UserDatabase = Depends(get_runtime_database_service),
 ):
-    try:
-        return service.register_sample_sqlite(user_id=user_id, runtime_id=runtime_id)
-    except RuntimeDatabaseError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service.register_sample_sqlite(user_id=user_id, runtime_id=runtime_id)
 
 
 @router.post(
@@ -64,19 +61,16 @@ async def upload_runtime_database(
     display_name: str = Form(default=""),
     file: UploadFile = File(...),
     runtime_id: str | None = Form(default=None),
-    service: UserDatabaseService = Depends(get_runtime_database_service),
+    service: UserDatabase = Depends(get_runtime_database_service),
 ):
     content = await file.read(MAX_UPLOAD_BYTES + 1)
-    try:
-        return service.register_uploaded_sqlite(
-            user_id=user_id,
-            display_name=display_name,
-            filename=file.filename or "database.db",
-            content=content,
-            runtime_id=runtime_id,
-        )
-    except RuntimeDatabaseError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return service.register_uploaded_sqlite(
+        user_id=user_id,
+        display_name=display_name,
+        filename=file.filename or "database.db",
+        content=content,
+        runtime_id=runtime_id,
+    )
 
 
 @router.get(
@@ -88,21 +82,16 @@ async def upload_runtime_database(
 def get_runtime_database_schema(
     runtime_db_id: str,
     user_id: int = Query(...),
-    service: UserDatabaseService = Depends(get_runtime_database_service),
+    service: UserDatabase = Depends(get_runtime_database_service),
 ):
-    try:
-        database = service.get_database(runtime_db_id, user_id=user_id)
-        tables = service.get_schema(runtime_db_id, user_id=user_id)
-        return RuntimeDatabaseSchema(
-            id=database.id,
-            name=database.name,
-            tables=tables,
-            summary=service.get_schema_summary(runtime_db_id, user_id=user_id),
-        )
-    except RuntimeDatabaseNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuntimeDatabaseError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    database = service.get_database(runtime_db_id, user_id=user_id)
+    tables = service.get_schema(runtime_db_id, user_id=user_id)
+    return RuntimeDatabaseSchema(
+        id=database.id,
+        name=database.name,
+        tables=tables,
+        summary=service.get_schema_summary(runtime_db_id, user_id=user_id),
+    )
 
 
 @router.delete(
@@ -114,9 +103,6 @@ def get_runtime_database_schema(
 def delete_runtime_database(
     runtime_db_id: str,
     user_id: int = Query(...),
-    service: UserDatabaseService = Depends(get_runtime_database_service),
+    service: UserDatabase = Depends(get_runtime_database_service),
 ):
-    try:
-        service.remove_database(runtime_db_id, user_id=user_id)
-    except RuntimeDatabaseNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    service.remove_database(runtime_db_id, user_id=user_id)
