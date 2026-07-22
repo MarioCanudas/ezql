@@ -3,7 +3,7 @@ from collections.abc import Sequence
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
 from backend.models import Content, LLMProviderConfig, Messages, Role
 from backend.prompts import DEFAULT_SYSTEM_PROMPT, SUMMARY_SYSTEM_PROMPT
@@ -51,7 +51,7 @@ def resolve_llm_provider(provider: str | None, model_name: str) -> str:
     return "openai"
 
 
-class LLMChatService(BaseModel):
+class AgentChat(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     model_name: str
@@ -59,6 +59,13 @@ class LLMChatService(BaseModel):
     api_key: str | None = None
     temperature: float = 0.2
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("API key cannot be empty or just whitespace.")
+        return v
 
     def _history_messages(self, history: Sequence[Messages]):
         messages = []
