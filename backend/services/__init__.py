@@ -1,13 +1,9 @@
-from .db_connection_service import DBConnectionService
-from .llm_chat_service import LLMChatService
-from .sql_agent_service import SQLAgentService
-from .tool_agent_service import ToolAgentService
-from .user_database_service import UserDatabaseService
+from .db_connection import DBConnection
+from .user_database import UserDatabase
+from .agent import SQLAgent
 
 __all__ = [
-    "DBConnectionService",
-    "LLMChatService",
-    "SQLAgentService",
-    "ToolAgentService",
-    "UserDatabaseService",
+    "DBConnection",
+    "SQLAgent",
+    "UserDatabase",
 ]

@@ -1,7 +1,7 @@
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from backend import models  # noqa: F401
-from backend.services.db_connection_service import DB_URL
+from backend.services.db_connection import DB_URL
 
 
 def init_db():
