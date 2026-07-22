@@ -2,14 +2,14 @@
 
 This document provides essential context, philosophy, and technical guidelines for AI agents working on the EzQL project.
 
-## 🎯 Project Overview
+## Project Overview
 **EzQL** is an autonomous data analyst interface. Its primary goal is to democratize data analytics by allowing users to interact with their databases using natural language. 
 
 **Key Distinction:** EzQL is **not** a Text-to-SQL converter for developers. It is a business intelligence tool for end-users. It must deliver answers, insights, and visualizations—never raw code.
 
 ---
 
-## 🧘 Philosophy & Core Principles
+## Philosophy & Core Principles
 
 ### 1. Total Code Abstraction
 Users should never see SQL, Python, or any technical artifacts. The agent's output must always be human-readable business language. If a query fails, the system should attempt to self-correct (via LangChain's agentic loops) or explain the issue in plain English without exposing database internals.
@@ -25,7 +25,7 @@ The project strictly separates the **Brain** (Backend) from the **Face** (Fronte
 
 ---
 
-## 🛠️ Tech Stack & Implementation Details
+## Tech Stack & Implementation Details
 
 ### Environment Management
 *   **[uv](https://github.com/astral-sh/uv):** Used for all package management. Always use `uv sync` or `uv add` for dependencies.
@@ -43,13 +43,37 @@ The project strictly separates the **Brain** (Backend) from the **Face** (Fronte
 
 ---
 
-## 📂 Project Structure
+## Backend Architecture Standards
+The backend follows a strict separation of paradigms between the API layer, generic services, and the agent ecosystem.
+
+### 1. API Layer (FastAPI Routers)
+*   **Functional & Thin Controllers:** Routers (`backend/routers/`) must be purely functional. Do not instantiate classes globally or within the routes.
+*   **Dependency Injection:** All services must be injected using FastAPI's `Depends()`. 
+*   **Global Exception Handling:** Do not use `try...except` blocks in routes to handle domain errors (e.g., `RuntimeDatabaseError`). Let exceptions bubble up to be caught by global handlers in `main.py` (`@app.exception_handler`).
+
+### 2. General Services Layer
+*   **OOP without Interfaces:** Business logic (`backend/services/`) is encapsulated in standard Python classes (e.g., `UserDatabase`). Do not enforce redundant Abstract Base Classes or interfaces unless absolutely necessary.
+*   **Naming Convention:** Do NOT append `_service` to class or file names (e.g., use `UserDatabase` in `user_database.py`, NOT `UserDatabaseService`).
+*   **Service Registry:** Services are cached and managed using a Singleton `ServiceRegistry` in `backend/utils/dependencies.py`. Never attach services directly to `request.app.state`.
+
+### 3. Agent Ecosystem (LangGraph)
+*   **Strict Contracts:** Due to the nature of LangGraph, nodes (`backend/services/agent/nodes/`) MUST inherit from `NodeBase`. 
+*   **Type Safety & Fail Fast:** Dependency injection for the graph must be done via `RunnableConfig` using strictly validated Pydantic models (e.g., `AgentConfiguration` in `state.py`). Validate critical requirements (like API keys or DB existence) *before* entering LLM loops.
+*   **Decoupled Tools:** LangChain tools (`@tool`) must be fully decoupled from the Nodes. They belong in `backend/services/agent/tools/` and should extract their context from `RunnableConfig`.
+
+---
+
+## Project Structure
 
 ```text
 ezql/
 ├── backend/                 # The Brain (FastAPI)
-│   ├── main.py              # Entrypoint & Routing
-│   └── services/            # AI & Stats logic
+│   ├── main.py              # Entrypoint & Global Exception Handlers
+│   ├── routers/             # Functional Thin Controllers
+│   ├── models/              # Shared API schemas and SQL entities
+│   ├── utils/               # ServiceRegistry & DI Providers
+│   └── services/            # Business Logic & OOP Service Objects
+│       └── agent/           # LangGraph ecosystem (Nodes, Tools, State)
 └── frontend/                # The UI Layer (Streamlit)
     ├── app.py               # Main interface
     └── components/          # Reusable UI elements
@@ -57,9 +81,10 @@ ezql/
 
 ---
 
-## 📝 Guidelines for Agents
+## Guidelines for Agents
 
 1.  **Maintain Abstraction:** When writing code for the backend, ensure error messages sent to the frontend are user-friendly.
 2.  **Statistically Driven:** When implementing data retrieval, look for opportunities to add "Invisible Analytics" (trend analysis, anomaly detection).
-3.  **API-First:** Ensure that any new feature is implemented in the backend service layer first, then exposed via a FastAPI endpoint, and finally consumed by the Streamlit frontend.
-4.  **Type Safety:** Use Pydantic models for all API exchanges to ensure the frontend can reliably render the backend's complex outputs.
+3.  **API-First & Functional:** Ensure new features are implemented in the service layer first, then exposed via a functional FastAPI endpoint relying on `Depends()`.
+4.  **Type Safety & Fail Fast:** Use Pydantic models for all API exchanges and internal Graph configurations. Catch invalid states immediately rather than deep within execution loops.
+5.  **Strict File Naming:** Never name files or classes with `_service` suffix in the `backend/services/` directory. Use absolute imports pointing to directories where possible.
