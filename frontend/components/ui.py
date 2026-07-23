@@ -10,15 +10,46 @@ def role_to_streamlit(role: str) -> str:
     return role
 
 
+def render_block(block: Any) -> None:
+    match block:
+        case {"type": "trend", **trend}:
+            st.info("**Tendencia Temporal Detectada**")
+            cols = st.columns(3)
+            cols[0].metric("Métrica", trend.get("metric", ""))
+            pct = trend.get("pct_change", 0)
+            if pct is not None:
+                try:
+                    pct = float(pct)
+                    cols[1].metric("Cambio Global", f"{pct:.2f}%", delta=pct)
+                except ValueError:
+                    cols[1].metric("Cambio Global", str(pct))
+            cols[2].metric("Tendencia", trend.get("direction", ""))
+            
+        case {"type": "outliers", "message": msg}:
+            st.info(f"**Anomalías**: {msg}")
+            
+        case {"type": "metric", "label": label, "value": value}:
+            st.metric(label, value)
+            
+        # Intentionally ignoring "table" and raw lists/dicts (legacy tables)
+        # because the LLM is now instructed to generate Markdown tables in the text.
+        # This prevents duplicating data visually.
+        case _:
+            pass
+
+
 def render_chat_messages(messages: list[dict[str, Any]]) -> None:
     for message in messages:
         role = role_to_streamlit(message["role"])
         content = message["content"]
         with st.chat_message(role):
-            st.markdown(content.get("text", ""))
-            data = content.get("data")
-            if isinstance(data, list) and data:
-                st.dataframe(data, hide_index=True, use_container_width=True)
+            text = content.get("text", "")
+            if text:
+                st.markdown(text)
+                
+            data = content.get("data") or []
+            for block in data:
+                render_block(block)
 
 
 def select_from_options(
