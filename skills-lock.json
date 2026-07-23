@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "developing-with-streamlit": {
+      "source": "streamlit/agent-skills",
+      "sourceType": "github",
+      "skillPath": "developing-with-streamlit/SKILL.md",
+      "computedHash": "9f8006c37398b5c6a27043bdfe3a25d4aafdfb53413618c88d2c978932f9d08e"
+    },
+    "fastapi": {
+      "source": "fastapi/fastapi",
+      "sourceType": "github",
+      "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
+      "computedHash": "e85d9e223fbc3183b1a599bbe8b02d2edf275d046ff5bcfd14352c92cdff52b3"
+    }
+  }
+}

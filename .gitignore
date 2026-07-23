@@ -20,3 +20,6 @@ wheels/
 .streamlit/
 
 *DS_Store
+
+# Ai agents
+.agents
