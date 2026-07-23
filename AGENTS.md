@@ -88,6 +88,7 @@ ezql/
 3.  **API-First & Functional:** Ensure new features are implemented in the service layer first, then exposed via a functional FastAPI endpoint relying on `Depends()`.
 4.  **Type Safety & Fail Fast:** Use Pydantic models for all API exchanges and internal Graph configurations. Catch invalid states immediately rather than deep within execution loops.
 5.  **Strict File Naming:** Never name files or classes with `_service` suffix in the `backend/services/` directory. Use absolute imports pointing to directories where possible.
+6.  **Efficient Searching:** Always use `ripgrep` (e.g. via the agent `grep_search` tool) instead of conventional `grep` when searching for text across the project to improve performance.
 
 ---
 
