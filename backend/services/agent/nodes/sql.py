@@ -1,7 +1,7 @@
 from typing import Any
-from langchain.agents import create_agent
 from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
+from langchain_core.messages import SystemMessage
 
 from backend.services.agent.state import AgentState, AgentConfiguration
 from backend.services.agent.nodes.base import NodeBase
@@ -13,8 +13,7 @@ from backend.services.agent.tools import sql_tools
 class SqlNode(NodeBase):
     def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         """
-        SQL Node that uses injected sql_tools
-        to answer database-related questions.
+        SQL Node that invokes the LLM bound to tools.
         """
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
@@ -29,19 +28,16 @@ class SqlNode(NodeBase):
             return {"messages": [AIMessage(content=str(exc))]}
 
         llm = agent_config.llm_service._build_client()
+        llm_with_tools = llm.bind_tools(sql_tools)
         
-        agent = create_agent(
-            model=llm, tools=sql_tools, system_prompt=SQL_AGENT_SYSTEM_PROMPT
-        )
+        messages = [SystemMessage(content=SQL_AGENT_SYSTEM_PROMPT)] + list(state.messages)
         
-        from typing import cast
         try:
-            response = agent.invoke(
-                cast(Any, {"messages": list(state.messages)}),
-                config={"configurable": config.get("configurable", {}), "recursion_limit": 25},
+            response = llm_with_tools.invoke(
+                messages,
+                config={"configurable": config.get("configurable", {})},
             )
-            new_message = response["messages"][-1]
-            return {"messages": [new_message]}
+            return {"messages": [response]}
         except Exception as exc:
             raise LLMGenerationError(
                 "The SQL assistant could not generate a response."

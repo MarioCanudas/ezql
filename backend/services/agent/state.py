@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Any
 from pydantic import BaseModel, Field, ConfigDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -17,8 +17,12 @@ class AgentConfiguration(BaseModel):
     llm_service: AgentChat
     runtime_db_id: str
     user_id: int
-    query_data: list = Field(default_factory=list)
+
+
+def append_data(left: list, right: list) -> list:
+    return left + right
 
 
 class AgentState(BaseModel):
     messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
+    query_data: Annotated[list[Any], append_data] = Field(default_factory=list)

@@ -167,8 +167,48 @@ class UserDatabase:
                 f"{column.name} ({column.type or 'tipo no declarado'})"
                 for column in table.columns
             )
-            lines.append(f"- {table.name}: {columns}")
-        return "Tablas disponibles:\n" + "\n".join(lines)
+            table_info = f"- {table.name}:\n  Columnas: {columns}"
+
+            try:
+                sql = f"SELECT * FROM {quote_identifier(table.name)} LIMIT 2"
+                # If user_id is None, we pass 0 or maybe just get_database directly
+                database = self.get_database(database_id, user_id=user_id)
+                with self._connect_readonly(database.path) as conn:
+                    # Foreign keys
+                    fk_rows = conn.execute(
+                        f"PRAGMA foreign_key_list({quote_identifier(table.name)})"
+                    ).fetchall()
+                    if fk_rows:
+                        fks = []
+                        for fk in fk_rows:
+                            fks.append(f"({fk['from']}) -> {fk['table']}({fk['to']})")
+                        table_info += "\n  Foreign Keys: " + ", ".join(fks)
+
+                    # Sample rows
+                    cursor = conn.execute(sql)
+                    raw_columns = [desc[0] for desc in cursor.description or []]
+                    rows = cursor.fetchall()
+                    if rows:
+                        samples = []
+                        for row in rows:
+                            row_dict = {
+                                col: self._to_json_value(row[col])
+                                for col in raw_columns
+                                if col in row.keys()
+                            }
+                            samples.append(str(row_dict))
+                        table_info += (
+                            "\n  Muestra de datos (2 filas):\n    "
+                            + "\n    ".join(samples)
+                        )
+            except Exception:
+                pass
+
+            lines.append(table_info)
+        return (
+            "Esquema de la base de datos (con muestras y foreign keys):\n\n"
+            + "\n\n".join(lines)
+        )
 
     def preview_table(
         self,
@@ -262,6 +302,78 @@ class UserDatabase:
             sql=sql,
             max_rows=10,
         )
+
+    def search_similar_values(
+        self, database_id: str, *, user_id: int, table_name: str, column_name: str, keyword: str
+    ) -> QueryResult:
+        # Sanitize keyword to avoid breaking the LIKE statement
+        safe_keyword = keyword.replace("'", "").replace("%", "")
+        sql = f"SELECT DISTINCT {quote_identifier(column_name)} FROM {quote_identifier(table_name)} WHERE {quote_identifier(column_name)} LIKE '%{safe_keyword}%' LIMIT 5"
+        return self.execute_readonly_query(database_id, user_id=user_id, sql=sql, max_rows=5)
+
+    def get_column_distinct_values(
+        self, database_id: str, *, user_id: int, table_name: str, column_name: str
+    ) -> QueryResult:
+        sql = f"SELECT {quote_identifier(column_name)}, COUNT(*) as count FROM {quote_identifier(table_name)} GROUP BY {quote_identifier(column_name)} ORDER BY count DESC LIMIT 10"
+        return self.execute_readonly_query(database_id, user_id=user_id, sql=sql, max_rows=10)
+
+    def validate_sql_syntax(self, database_id: str, *, user_id: int, sql: str) -> str:
+        database = self.get_database(database_id, user_id=user_id)
+        try:
+            with self._connect_readonly(database.path) as connection:
+                connection.execute("EXPLAIN " + sql)
+            return "Sintaxis válida."
+        except sqlite3.Error as exc:
+            return f"Error de sintaxis o esquema: {exc}"
+            
+    def analyze_trend_pandas(self, database_id: str, *, user_id: int, table_name: str, date_column: str, metric_column: str) -> dict:
+        import pandas as pd
+        sql = f"SELECT {quote_identifier(date_column)} as date, {quote_identifier(metric_column)} as metric FROM {quote_identifier(table_name)} WHERE {quote_identifier(date_column)} IS NOT NULL"
+        res = self.execute_readonly_query(database_id, user_id=user_id, sql=sql, max_rows=1000)
+        if not res.rows:
+            return {"error": "No hay suficientes datos para analizar la tendencia."}
+        df = pd.DataFrame(res.rows)
+        try:
+            df['date'] = pd.to_datetime(df['date'])
+            df['metric'] = pd.to_numeric(df['metric'], errors='coerce')
+            df = df.dropna()
+            if df.empty:
+                return {"error": "Columna métrica no contiene datos numéricos o fechas inválidas."}
+            df = df.sort_values('date')
+            trend = df['metric'].diff().mean()
+            direction = "al alza" if trend > 0 else "a la baja" if trend < 0 else "estable"
+            return {
+                "message": f"Tendencia general {direction}.",
+                "average_change_per_period": float(trend)
+            }
+        except Exception as e:
+            return {"error": f"Error calculando tendencia: {e}"}
+
+    def detect_outliers_pandas(self, database_id: str, *, user_id: int, table_name: str, category_column: str, metric_column: str) -> dict:
+        import pandas as pd
+        import numpy as np
+        sql = f"SELECT {quote_identifier(category_column)} as category, {quote_identifier(metric_column)} as metric FROM {quote_identifier(table_name)} WHERE {quote_identifier(metric_column)} IS NOT NULL"
+        res = self.execute_readonly_query(database_id, user_id=user_id, sql=sql, max_rows=1000)
+        if not res.rows:
+            return {"error": "No hay datos."}
+        df = pd.DataFrame(res.rows)
+        try:
+            df['metric'] = pd.to_numeric(df['metric'], errors='coerce')
+            df = df.dropna()
+            mean = df['metric'].mean()
+            std = df['metric'].std()
+            if std == 0:
+                return {"message": "No hay anomalías, todos los valores son iguales."}
+            df['z_score'] = (df['metric'] - mean) / std
+            outliers = df[np.abs(df['z_score']) > 2]
+            if outliers.empty:
+                return {"message": "No se encontraron valores atípicos (Z-score > 2)."}
+            return {
+                "message": f"Se encontraron {len(outliers)} anomalías.",
+                "outliers": outliers[['category', 'metric']].to_dict('records')
+            }
+        except Exception as e:
+            return {"error": f"Error detectando anomalías: {e}"}
 
     def execute_readonly_query(
         self,

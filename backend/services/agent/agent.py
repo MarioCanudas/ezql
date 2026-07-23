@@ -76,11 +76,15 @@ class SQLAgent:
             runtime_db_id=runtime_db_id,
             user_id=user_id,
         )
+        
+        query_data_ref = []
+        config_dict = agent_config.model_dump()
+        config_dict["query_data_ref"] = query_data_ref
 
         try:
             response = self.graph.invoke(
                 initial_state,
-                config={"configurable": agent_config.model_dump(), "recursion_limit": 25},
+                config={"configurable": config_dict, "recursion_limit": 25},
             )
             text_response = str(response["messages"][-1].content)
         except LLMGenerationError:
@@ -90,4 +94,4 @@ class SQLAgent:
                 "The SQL assistant could not generate a response."
             ) from exc
 
-        return AgentReply(text=text_response, data=agent_config.query_data)
+        return AgentReply(text=text_response, data=query_data_ref)
