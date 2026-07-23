@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from backend.services.agent.state import AgentConfiguration
 from backend.services.user_database import RuntimeDatabaseError
 from backend.services.sql_safety import UnsafeSQLError
+from backend.models.blocks import TableBlock, MetricBlock
 
 def _get_config(config: RunnableConfig) -> AgentConfiguration:
     try:
@@ -31,7 +32,9 @@ def preview_table(table_name: str, config: RunnableConfig, limit: int = 20) -> d
             table_name=table_name,
             limit=limit,
         )
-        agent_config.query_data.append(result.rows)
+        query_data_ref = config.get("configurable", {}).get("query_data_ref")
+        if query_data_ref is not None:
+            query_data_ref.append(TableBlock(rows=result.rows).model_dump())
         return {
             "columns": result.columns,
             "row_count": result.row_count,
@@ -49,7 +52,9 @@ def count_rows(table_name: str, config: RunnableConfig) -> dict | str:
         total = agent_config.database_service.count_rows(
             agent_config.runtime_db_id, user_id=agent_config.user_id, table_name=table_name
         )
-        agent_config.query_data.append([{"total": total}])
+        query_data_ref = config.get("configurable", {}).get("query_data_ref")
+        if query_data_ref is not None:
+            query_data_ref.append(MetricBlock(label="Total de Filas", value=total).model_dump())
         return {"total": total}
     except Exception as e:
         return f"Error: {e}"
@@ -65,7 +70,9 @@ def summarize_column(table_name: str, column_name: str, config: RunnableConfig) 
             table_name=table_name,
             column_name=column_name,
         )
-        agent_config.query_data.append(result.rows)
+        query_data_ref = config.get("configurable", {}).get("query_data_ref")
+        if query_data_ref is not None:
+            query_data_ref.append(TableBlock(rows=result.rows).model_dump())
         return {
             "columns": result.columns,
             "row_count": result.row_count,
@@ -83,7 +90,9 @@ def execute_advanced_sql(sql: str, config: RunnableConfig) -> dict | str:
         result = agent_config.database_service.execute_readonly_query(
             agent_config.runtime_db_id, user_id=agent_config.user_id, sql=sql
         )
-        agent_config.query_data.append(result.rows)
+        query_data_ref = config.get("configurable", {}).get("query_data_ref")
+        if query_data_ref is not None:
+            query_data_ref.append(TableBlock(rows=result.rows).model_dump())
         return {
             "columns": result.columns,
             "row_count": result.row_count,
@@ -96,3 +105,47 @@ def execute_advanced_sql(sql: str, config: RunnableConfig) -> dict | str:
         return f"Error de SQLite: {e}. Revisa el esquema, las comillas y la sintaxis."
     except Exception as e:
         return f"Error desconocido: {e}"
+
+@tool
+def search_similar_values(table_name: str, column_name: str, keyword: str, config: RunnableConfig) -> dict | str:
+    """Busca valores categóricos reales en la base de datos que se parezcan a un keyword. Úsalo ANTES de armar un WHERE para evitar alucinaciones."""
+    agent_config = _get_config(config)
+    try:
+        result = agent_config.database_service.search_similar_values(
+            agent_config.runtime_db_id, user_id=agent_config.user_id, table_name=table_name, column_name=column_name, keyword=keyword
+        )
+        return {"matched_values": [row[column_name] for row in result.rows]}
+    except Exception as e:
+        return f"Error: {e}"
+
+@tool
+def get_column_distinct_values(table_name: str, column_name: str, config: RunnableConfig) -> dict | str:
+    """Obtiene los valores únicos (categorías) más frecuentes de una columna. Útil para conocer los valores exactos antes de un filtrado estricto."""
+    agent_config = _get_config(config)
+    try:
+        result = agent_config.database_service.get_column_distinct_values(
+            agent_config.runtime_db_id, user_id=agent_config.user_id, table_name=table_name, column_name=column_name
+        )
+        return {"distinct_values": [row[column_name] for row in result.rows]}
+    except Exception as e:
+        return f"Error: {e}"
+
+@tool
+def validate_sql_syntax(sql: str, config: RunnableConfig) -> str:
+    """Valida la sintaxis de una consulta SQL de forma segura sin ejecutarla. Úsalo siempre antes de usar execute_advanced_sql con consultas complejas."""
+    agent_config = _get_config(config)
+    return agent_config.database_service.validate_sql_syntax(
+        agent_config.runtime_db_id, user_id=agent_config.user_id, sql=sql
+    )
+
+@tool
+def query_planner(plan_steps: list[str]) -> str:
+    """Úsalo para escribir los pasos lógicos de cómo vas a resolver el problema (ej. uniones, filtros) ANTES de generar SQL."""
+    return f"Plan registrado. Pasos: {len(plan_steps)}. Procede a escribir o ejecutar el SQL."
+
+@tool
+def transfer_to_statistics() -> str:
+    """Úsalo cuando el usuario pida analizar tendencias temporales o anomalías estadísticas. Esto te transfiere al Especialista en Estadística."""
+    # En LangGraph > 1.2, devolveremos Command. Como import local para evitar problemas:
+    from langgraph.types import Command
+    return Command(goto="statistics")
