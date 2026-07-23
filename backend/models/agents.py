@@ -1,8 +1,10 @@
-from pydantic import BaseModel, ConfigDict, JsonValue
+from typing import Any
+from pydantic import BaseModel, ConfigDict
+from backend.models.blocks import FlexibleDataBlock
 
 
 class AgentReply(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     text: str
-    data: list[dict[str, JsonValue]] | None = None
+    data: list[FlexibleDataBlock] | None = None

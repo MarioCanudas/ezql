@@ -10,9 +10,11 @@ class Role(str, Enum):
     assistant = "agent"
 
 
+from backend.models.blocks import FlexibleDataBlock
+
 class Content(BaseModel):
     text: str
-    data: list[dict[str, JsonValue]] | None = None
+    data: list[FlexibleDataBlock] | None = None
 
 
 class MessageBase(SQLModel):
