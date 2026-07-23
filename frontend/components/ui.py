@@ -103,7 +103,7 @@ def display_table(
             {column: row.get(column) for column in column_order if column in row}
             for row in rows
         ]
-    st.dataframe(rows, hide_index=True, use_container_width=True)
+    st.dataframe(rows, hide_index=True, width="stretch")
 
 
 def format_model(model: dict[str, Any]) -> str:

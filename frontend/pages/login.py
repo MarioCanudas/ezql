@@ -37,7 +37,7 @@ def render() -> None:
             submitted = st.form_submit_button(
                 "Entrar",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
 
         if submitted:
@@ -54,5 +54,5 @@ def render() -> None:
 
     st.divider()
     st.caption("¿No tienes usuario?")
-    if st.button("Crear usuario", use_container_width=True):
+    if st.button("Crear usuario", width="stretch"):
         create_user_dialog(login_after_create=True)

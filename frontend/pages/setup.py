@@ -29,7 +29,7 @@ def _section_card(
         st.caption(description)
         st.write(preview)
         if button_label and on_click:
-            if st.button(button_label, use_container_width=True, key=f"action_{title}"):
+            if st.button(button_label, width="stretch", key=f"action_{title}"):
                 on_click()
 
 

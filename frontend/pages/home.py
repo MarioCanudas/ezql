@@ -68,17 +68,17 @@ def render() -> None:
     st.divider()
 
     actions = st.columns(3)
-    if actions[0].button("Nuevo chat", type="primary", use_container_width=True):
+    if actions[0].button("Nuevo chat", type="primary", width="stretch"):
         st.session_state["nav_to_path"] = "nuevo-chat"
         st.rerun()
-    if actions[1].button("Agregar base de datos", use_container_width=True):
+    if actions[1].button("Agregar base de datos", width="stretch"):
         try:
             engines = api_client.list_engines()
         except api_client.ApiError as exc:
             st.error(str(exc))
             return
         create_database_dialog(users=users, engines=engines, default_user_id=user_id)
-    if actions[2].button("Configurar API keys", use_container_width=True):
+    if actions[2].button("Configurar API keys", width="stretch"):
         profile_dialog(user_id=user_id)
 
     st.divider()
