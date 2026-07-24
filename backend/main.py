@@ -1,12 +1,16 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from backend.routers import api_router
-from backend.services.user_database import RuntimeDatabaseError, RuntimeDatabaseNotFoundError
+from backend.services.user_database import (
+    RuntimeDatabaseError,
+    RuntimeDatabaseNotFoundError,
+)
 from backend.services.agent.agent_chat import LLMConfigurationError, LLMGenerationError
 from backend.utils.dependencies import ServiceRegistry
 
@@ -56,12 +60,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 @app.exception_handler(RuntimeDatabaseNotFoundError)
-async def runtime_database_not_found_handler(request: Request, exc: RuntimeDatabaseNotFoundError):
+async def runtime_database_not_found_handler(
+    request: Request, exc: RuntimeDatabaseNotFoundError
+):
     return JSONResponse(
         status_code=status.HTTP_404_NOT_FOUND,
         content={"detail": str(exc)},
     )
+
 
 @app.exception_handler(RuntimeDatabaseError)
 async def runtime_database_error_handler(request: Request, exc: RuntimeDatabaseError):
@@ -70,6 +78,7 @@ async def runtime_database_error_handler(request: Request, exc: RuntimeDatabaseE
         content={"detail": str(exc)},
     )
 
+
 @app.exception_handler(LLMConfigurationError)
 async def llm_configuration_error_handler(request: Request, exc: LLMConfigurationError):
     return JSONResponse(
@@ -77,15 +86,21 @@ async def llm_configuration_error_handler(request: Request, exc: LLMConfiguratio
         content={"detail": str(exc)},
     )
 
-import logging
+
 logger = logging.getLogger(__name__)
+
 
 @app.exception_handler(LLMGenerationError)
 async def llm_generation_error_handler(request: Request, exc: LLMGenerationError):
     logger.exception("LLM generation error: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        content={"detail": str(exc) if str(exc) else "The assistant could not generate a response. Please try again."},
+        content={
+            "detail": str(exc)
+            if str(exc)
+            else "The assistant could not generate a response. Please try again."
+        },
     )
+
 
 app.include_router(api_router, prefix="/api/v1")
