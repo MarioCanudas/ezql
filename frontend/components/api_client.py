@@ -32,7 +32,7 @@ def _base_url() -> str:
 
 @st.cache_resource
 def get_client(base_url: str) -> httpx.Client:
-    return httpx.Client(base_url=base_url, timeout=30.0)
+    return httpx.Client(base_url=base_url, timeout=300.0)
 
 
 def _handle_response(response: httpx.Response) -> Any:
@@ -64,6 +64,12 @@ def _request(
             "No se pudo conectar con el backend. Verifica que FastAPI este "
             "ejecutandose y que API_BASE_URL en secrets.toml sea correcto."
         ) from exc
+    except httpx.ReadTimeout as exc:
+        raise ApiError(
+            "El agente está tardando más de lo esperado en responder. "
+            "Tu consulta sigue procesándose en el servidor. "
+            "Sal del chat y vuelve a entrar en unos segundos para ver la respuesta."
+        ) from exc
     except httpx.RequestError as exc:
         raise ApiError(
             "Error de red al llamar al backend. Verifica la URL configurada."
@@ -85,6 +91,12 @@ def _request_multipart(
         raise ApiError(
             "No se pudo conectar con el backend. Verifica que FastAPI este "
             "ejecutandose y que API_BASE_URL en secrets.toml sea correcto."
+        ) from exc
+    except httpx.ReadTimeout as exc:
+        raise ApiError(
+            "El agente está tardando más de lo esperado en responder. "
+            "Tu consulta sigue procesándose en el servidor. "
+            "Sal del chat y vuelve a entrar en unos segundos para ver la respuesta."
         ) from exc
     except httpx.RequestError as exc:
         raise ApiError(

@@ -182,7 +182,11 @@ def render(chat_id: int | None = None) -> None:
     if prompt := st.chat_input(
         "Escribe tu pregunta sobre los datos", disabled=runtime_db_missing
     ):
-        with st.status("Analizando tu consulta...", expanded=False):
+        # Optimistic UI: show the user's message immediately
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.status("Analizando tu consulta…", expanded=True):
             try:
                 response = api_client.create_reply(
                     chat_id=chat_id,
@@ -192,7 +196,5 @@ def render(chat_id: int | None = None) -> None:
             except api_client.ApiError as exc:
                 st.error(str(exc))
                 return
-        st.session_state["chat_messages"].extend(
-            [response["user_message"], response["assistant_message"]]
-        )
         st.rerun()
+
