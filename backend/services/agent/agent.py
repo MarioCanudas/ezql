@@ -61,6 +61,7 @@ class AnalystAgent:
         summary: str | None,
         runtime_db_id: str,
         user_id: int,
+        recursion_limit: int = 150,
     ) -> AgentReply:
         message = user_message.strip()
         if not message:
@@ -90,14 +91,12 @@ class AnalystAgent:
         config_dict = agent_config.model_dump()
         config_dict["query_data_ref"] = query_data_ref
 
-        DEFAULT_RECURSION_LIMIT = 50
-
         try:
             response = self.graph.invoke(
                 initial_state,
                 config={
                     "configurable": config_dict,
-                    "recursion_limit": DEFAULT_RECURSION_LIMIT,
+                    "recursion_limit": recursion_limit,
                 },
             )
             text_response = str(response["messages"][-1].content)
