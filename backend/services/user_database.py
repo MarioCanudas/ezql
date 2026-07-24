@@ -138,6 +138,10 @@ class UserDatabase:
         self, database_id: str, *, user_id: int | None = None
     ) -> RuntimeDatabaseInternal:
         database = self._databases.get(database_id)
+        if database is None and database_id.startswith("sample-") and user_id is not None:
+            self.register_sample_sqlite(user_id=user_id)
+            database = self._databases.get(database_id)
+
         if database is None:
             raise RuntimeDatabaseNotFoundError(
                 "La base de datos temporal ya no está cargada. Vuelve a subirla para continuar."
