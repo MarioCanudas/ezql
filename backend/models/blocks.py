@@ -20,8 +20,12 @@ class OutlierBlock(BaseModel):
     type: Literal["outliers"] = "outliers"
     message: str
 
+class ChartBlock(BaseModel):
+    type: Literal["chart"] = "chart"
+    spec: dict[str, Any]
+
 DataBlock = Annotated[
-    TableBlock | MetricBlock | TrendBlock | OutlierBlock,
+    TableBlock | MetricBlock | TrendBlock | OutlierBlock | ChartBlock,
     Field(discriminator="type")
 ]
 

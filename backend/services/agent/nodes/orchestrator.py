@@ -1,19 +1,18 @@
 from typing import Any
+from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
-from langchain_core.messages import SystemMessage
 
 from backend.services.agent.state import AgentState, AgentConfiguration
 from backend.services.agent.nodes.base import NodeBase
-from backend.prompts import SQL_AGENT_SYSTEM_PROMPT
-from backend.services.agent.agent_chat import LLMGenerationError
-from backend.services.agent.tools import sql_tools
+from backend.services.agent.tools import orchestrator_tools
+from backend.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 
 
-class SqlNode(NodeBase):
+class OrchestratorNode(NodeBase):
     def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         """
-        SQL Node that invokes the LLM bound to tools.
+        Orchestrator Node that routes user requests to the appropriate specialist.
         """
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
@@ -26,9 +25,9 @@ class SqlNode(NodeBase):
         )
 
         llm = agent_config.llm_service._build_client()
-        llm_with_tools = llm.bind_tools(sql_tools)
+        llm_with_tools = llm.bind_tools(orchestrator_tools)
 
-        messages = [SystemMessage(content=SQL_AGENT_SYSTEM_PROMPT)] + list(state.messages)
+        messages = [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT)] + list(state.messages)
 
         try:
             response = llm_with_tools.invoke(
@@ -38,7 +37,8 @@ class SqlNode(NodeBase):
             return {"messages": [response]}
         except Exception as exc:
             import logging
-            logging.getLogger(__name__).exception("SqlNode execution failed: %s", exc)
+            logging.getLogger(__name__).exception("OrchestratorNode execution failed: %s", exc)
+            from backend.services.agent.agent_chat import LLMGenerationError
             raise LLMGenerationError(
-                f"El asistente de SQL no pudo generar una respuesta: {exc}"
+                f"El orquestador no pudo procesar la solicitud: {exc}"
             ) from exc

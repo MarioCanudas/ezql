@@ -8,13 +8,22 @@ from .sql import (
     get_column_distinct_values,
     validate_sql_syntax,
     query_planner,
-    transfer_to_statistics,
 )
 
 from .statistics import (
     analyze_trend,
     detect_outliers,
-    transfer_to_sql,
+)
+
+from .orchestrator import (
+    delegate_to_sql,
+    delegate_to_statistics,
+    delegate_to_visualization,
+)
+
+from .visualization import (
+    create_bar_chart,
+    create_line_chart,
 )
 
 sql_tools = [
@@ -27,13 +36,27 @@ sql_tools = [
     get_column_distinct_values,
     validate_sql_syntax,
     query_planner,
-    transfer_to_statistics,
 ]
 
 statistics_tools = [
     analyze_trend,
     detect_outliers,
-    transfer_to_sql,
 ]
 
-__all__ = ["sql_tools", "statistics_tools"]
+orchestrator_tools = [
+    delegate_to_sql,
+    delegate_to_statistics,
+    delegate_to_visualization,
+]
+
+visualization_tools = [
+    create_bar_chart,
+    create_line_chart,
+]
+
+__all__ = [
+    "sql_tools",
+    "statistics_tools",
+    "orchestrator_tools",
+    "visualization_tools",
+]

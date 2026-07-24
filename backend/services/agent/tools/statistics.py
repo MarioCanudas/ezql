@@ -1,6 +1,5 @@
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
-from langgraph.types import Command
 from pydantic import ValidationError
 
 from backend.services.agent.state import AgentConfiguration
@@ -71,8 +70,3 @@ def detect_outliers(
     except Exception as e:
         return f"Error en detección de anomalías: {e}"
 
-
-@tool
-def transfer_to_sql() -> Command:
-    """Úsalo cuando el usuario haga una pregunta que solo requiera SQL simple (ej. 'cuántos usuarios hay', 'muéstrame la tabla') o si terminaste de analizar las tendencias y le pasas el control de vuelta al Agente SQL."""
-    return Command(goto="sql")

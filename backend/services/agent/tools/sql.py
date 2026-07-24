@@ -143,9 +143,3 @@ def query_planner(plan_steps: list[str]) -> str:
     """Úsalo para escribir los pasos lógicos de cómo vas a resolver el problema (ej. uniones, filtros) ANTES de generar SQL."""
     return f"Plan registrado. Pasos: {len(plan_steps)}. Procede a escribir o ejecutar el SQL."
 
-@tool
-def transfer_to_statistics() -> str:
-    """Úsalo cuando el usuario pida analizar tendencias temporales o anomalías estadísticas. Esto te transfiere al Especialista en Estadística."""
-    # En LangGraph > 1.2, devolveremos Command. Como import local para evitar problemas:
-    from langgraph.types import Command
-    return Command(goto="statistics")
