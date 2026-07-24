@@ -24,7 +24,7 @@ from backend.services.agent.agent_chat import (
     LLMGenerationError,
     resolve_llm_provider,
 )
-from backend.services.agent import SQLAgent
+from backend.services.agent import AnalystAgent
 from backend.services.user_database import (
     RuntimeDatabaseError,
     RuntimeDatabaseNotFoundError,
@@ -240,7 +240,7 @@ def generate_reply(
 
     summary_service: AgentChat
     if chat.runtime_db_id:
-        service = SQLAgent(
+        service = AnalystAgent(
             database_service=runtime_database_service,
             model_name=model.name,
             provider=model.company,
@@ -275,12 +275,16 @@ def generate_reply(
     session.refresh(assistant_message)
 
     updated_history = [*history, assistant_message]
-    chat.summary = summary_service.summarize_chat(
-        updated_history,
-        current_summary=chat.summary,
-    )
-    session.add(chat)
-    session.commit()
+    try:
+        chat.summary = summary_service.summarize_chat(
+            updated_history,
+            current_summary=chat.summary,
+        )
+        session.add(chat)
+        session.commit()
+    except Exception:
+        # Summary is a best-effort optimization — never block the response.
+        session.rollback()
 
     return ChatReplyResponse(
         user_message=_to_message_read(user_message),

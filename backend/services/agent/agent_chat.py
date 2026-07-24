@@ -138,8 +138,10 @@ class AgentChat(BaseModel):
         try:
             response = client.invoke(self._build_messages(history, summary=summary))
         except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("AgentChat LLM invocation failed: %s", exc)
             raise LLMGenerationError(
-                "The assistant could not generate a response."
+                f"Error en la llamada al modelo LLM: {exc}"
             ) from exc
 
         return self._message_text(response.content)

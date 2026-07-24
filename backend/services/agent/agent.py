@@ -4,21 +4,21 @@ from collections.abc import Sequence
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from backend.models import AgentReply, Messages
-from backend.prompts import SQL_AGENT_SYSTEM_PROMPT
 from backend.services.agent.agent_chat import (
     AgentChat,
     LLMGenerationError,
     LLMConfigurationError,
 )
-from backend.services.user_database import UserDatabase
+from backend.services.user_database import UserDatabase, RuntimeDatabaseError
 from backend.services.agent.graph import create_agent_graph
 from backend.services.agent.state import AgentState
+from backend.services.agent.nodes.orchestrator import OrchestratorNode
 from backend.services.agent.nodes.sql import SqlNode
 from backend.services.agent.nodes.statistics import StatisticsNode
 from backend.services.agent.nodes.visualization import VisualizationNode
 
 
-class SQLAgent:
+class AnalystAgent:
     def __init__(
         self,
         *,
@@ -37,15 +37,18 @@ class SQLAgent:
             provider=provider,
             api_key=api_key,
             temperature=temperature,
-            system_prompt=SQL_AGENT_SYSTEM_PROMPT,
         )
 
+        self.orchestrator_node = OrchestratorNode()
         self.sql_node = SqlNode()
         self.statistics_node = StatisticsNode()
         self.visualization_node = VisualizationNode()
 
         self.graph = create_agent_graph(
-            self.sql_node, self.statistics_node, self.visualization_node
+            self.orchestrator_node,
+            self.sql_node,
+            self.statistics_node,
+            self.visualization_node,
         )
 
     def generate_reply(
@@ -64,8 +67,12 @@ class SQLAgent:
         chat_messages = []
         if summary:
             chat_messages.append(SystemMessage(content=f"Resumen del chat: {summary}"))
-        chat_messages.extend(self.llm_service._history_messages(history))
-        chat_messages.append(HumanMessage(content=message))
+        history_msgs = self.llm_service._history_messages(history)
+        chat_messages.extend(history_msgs)
+        if not history_msgs or not (
+            isinstance(history_msgs[-1], HumanMessage) and history_msgs[-1].content == message
+        ):
+            chat_messages.append(HumanMessage(content=message))
 
         initial_state = AgentState(messages=chat_messages)
 
@@ -76,22 +83,29 @@ class SQLAgent:
             runtime_db_id=runtime_db_id,
             user_id=user_id,
         )
-        
+
         query_data_ref = []
         config_dict = agent_config.model_dump()
         config_dict["query_data_ref"] = query_data_ref
 
+        DEFAULT_RECURSION_LIMIT = 50
+
         try:
             response = self.graph.invoke(
                 initial_state,
-                config={"configurable": config_dict, "recursion_limit": 25},
+                config={
+                    "configurable": config_dict,
+                    "recursion_limit": DEFAULT_RECURSION_LIMIT,
+                },
             )
             text_response = str(response["messages"][-1].content)
-        except LLMGenerationError:
+        except (LLMGenerationError, RuntimeDatabaseError):
             raise
         except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("AnalystAgent graph execution failed: %s", exc)
             raise LLMGenerationError(
-                "The SQL assistant could not generate a response."
+                f"Error al generar la respuesta del asistente: {exc}"
             ) from exc
 
         return AgentReply(text=text_response, data=query_data_ref)

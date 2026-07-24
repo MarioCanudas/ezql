@@ -77,11 +77,15 @@ async def llm_configuration_error_handler(request: Request, exc: LLMConfiguratio
         content={"detail": str(exc)},
     )
 
+import logging
+logger = logging.getLogger(__name__)
+
 @app.exception_handler(LLMGenerationError)
 async def llm_generation_error_handler(request: Request, exc: LLMGenerationError):
+    logger.exception("LLM generation error: %s", exc)
     return JSONResponse(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        content={"detail": "The assistant could not generate a response. Please try again."},
+        content={"detail": str(exc) if str(exc) else "The assistant could not generate a response. Please try again."},
     )
 
 app.include_router(api_router, prefix="/api/v1")
