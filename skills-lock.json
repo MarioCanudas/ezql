@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "caveman-commit": {
+      "source": "juliusbrussee/caveman",
+      "sourceType": "github",
+      "skillPath": "skills/caveman-commit/SKILL.md",
+      "computedHash": "790a4eeace0be35c6691faf923518ba5bd50f1f1305d1101d09dd4971be94e00"
+    },
     "developing-with-streamlit": {
       "source": "streamlit/agent-skills",
       "sourceType": "github",
@@ -12,6 +18,24 @@
       "sourceType": "github",
       "skillPath": "fastapi/.agents/skills/fastapi/SKILL.md",
       "computedHash": "e85d9e223fbc3183b1a599bbe8b02d2edf275d046ff5bcfd14352c92cdff52b3"
+    },
+    "langchain-fundamentals": {
+      "source": "langchain-ai/langchain-skills",
+      "sourceType": "github",
+      "skillPath": "config/skills/langchain-fundamentals/SKILL.md",
+      "computedHash": "5a1ded1b185ed95aab2b795f6134ce1ea9c19dddc5d5c8f291b31c0db4f0e379"
+    },
+    "langchain-rag": {
+      "source": "langchain-ai/langchain-skills",
+      "sourceType": "github",
+      "skillPath": "config/skills/langchain-rag/SKILL.md",
+      "computedHash": "d836f8a425104fe4e925135cb06a1217c2ded6576ee426e11e3f657e6c371da4"
+    },
+    "langgraph-docs": {
+      "source": "langchain-ai/deepagents",
+      "sourceType": "github",
+      "skillPath": "libs/cli/examples/skills/langgraph-docs/SKILL.md",
+      "computedHash": "623b8c10cbb70f70ea875d1b0901f0fb0e174a837c2d6d10707627a46ae30631"
     }
   }
 }

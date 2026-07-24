@@ -29,6 +29,7 @@ backend = [
 dev = [
     "basedpyright>=1.39.5",
     "poethepoet>=0.46.0",
+    "pytest>=8.0",
     "ruff>=0.15.13",
 ]
 frontend = [
@@ -45,5 +46,10 @@ exclude = [
 venvPath = "."
 venv = ".venv"
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
 [tool.poe.tasks]
 run-app = { shell = "PIDS=$(lsof -ti tcp:8000); if [ -n \"$PIDS\" ]; then kill $PIDS; sleep 2; PIDS=$(lsof -ti tcp:8000); if [ -n \"$PIDS\" ]; then kill -9 $PIDS; sleep 1; fi; fi; trap 'kill $BACKEND_PID' EXIT; uv run fastapi dev backend/main.py --host 127.0.0.1 --port 8000 & BACKEND_PID=$!; sleep 2; uv run streamlit run frontend/app.py", help = "Run FastAPI backend and Streamlit frontend" }
+run-test = { cmd = "uv run pytest tests/ -v --tb=short", help = "Run the backend test suite" }
