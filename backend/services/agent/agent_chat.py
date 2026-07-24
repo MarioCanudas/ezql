@@ -58,6 +58,7 @@ class AgentChat(BaseModel):
     provider: str | None = None
     api_key: str | None = None
     temperature: float = 0.2
+    reasoning_effort: str | None = None
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
     @field_validator("api_key")
@@ -116,12 +117,31 @@ class AgentChat(BaseModel):
         if not base_url:
             base_url = config.default_base_url
 
-        return ChatOpenAI(
-            model=self.model_name,
-            temperature=self.temperature,
-            api_key=SecretStr(api_key),
-            base_url=base_url,
+        provider_key = resolve_llm_provider(self.provider, self.model_name)
+        model_lower = self.model_name.strip().casefold()
+        is_reasoning_model = (
+            model_lower.startswith(("o1", "o3"))
+            or "reasoner" in model_lower
+            or "r1" in model_lower
         )
+
+        client_kwargs: dict[str, object] = {
+            "model": self.model_name,
+            "api_key": SecretStr(api_key),
+            "base_url": base_url,
+        }
+
+        if not is_reasoning_model:
+            client_kwargs["temperature"] = self.temperature
+
+        effort = self.reasoning_effort
+        if not effort and is_reasoning_model and provider_key == "openai":
+            effort = "medium"
+
+        if effort:
+            client_kwargs["reasoning_effort"] = effort
+
+        return ChatOpenAI(**client_kwargs)
 
     def _message_text(self, response_content) -> str:
         if isinstance(response_content, str):

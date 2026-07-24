@@ -27,6 +27,7 @@ class AnalystAgent:
         provider: str | None,
         api_key: str,
         temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> None:
         if not api_key or not api_key.strip():
             raise LLMConfigurationError("The API key is required and cannot be empty.")
@@ -37,6 +38,7 @@ class AnalystAgent:
             provider=provider,
             api_key=api_key,
             temperature=temperature,
+            reasoning_effort=reasoning_effort,
         )
 
         self.orchestrator_node = OrchestratorNode()

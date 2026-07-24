@@ -66,6 +66,28 @@ class TestAgentChatValidation:
         chat = AgentChat(model_name="gpt-4", provider="openai", api_key="sk-valid")
         assert chat.api_key == "sk-valid"
 
+    def test_openai_reasoning_model_build_client(self):
+        chat = AgentChat(model_name="o3-mini", provider="openai", api_key="sk-test")
+        client = chat._build_client()
+        assert getattr(client, "reasoning_effort", None) == "medium"
+        assert getattr(client, "temperature", None) is None or getattr(client, "temperature", None) == 1.0
+
+    def test_deepseek_reasoner_build_client(self):
+        chat = AgentChat(model_name="deepseek-reasoner", provider="deepseek", api_key="sk-test")
+        client = chat._build_client()
+        assert client.model_name == "deepseek-reasoner"
+        assert client.openai_api_base == "https://api.deepseek.com"
+
+    def test_custom_reasoning_effort(self):
+        chat = AgentChat(
+            model_name="gpt-4o",
+            provider="openai",
+            api_key="sk-test",
+            reasoning_effort="high",
+        )
+        client = chat._build_client()
+        assert getattr(client, "reasoning_effort", None) == "high"
+
 
 # ---------------------------------------------------------------------------
 # _history_messages
