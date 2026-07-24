@@ -4,7 +4,7 @@ from pydantic import ValidationError
 from langchain_core.messages import SystemMessage
 
 from backend.services.agent.state import AgentState, AgentConfiguration
-from backend.services.agent.nodes.base import NodeBase
+from backend.services.agent.nodes.base import NodeBase, sanitize_tool_calls_in_messages
 from backend.prompts import SQL_AGENT_SYSTEM_PROMPT
 from backend.services.agent.agent_chat import LLMGenerationError
 from backend.services.agent.tools import sql_tools
@@ -26,9 +26,10 @@ class SqlNode(NodeBase):
         )
 
         llm = agent_config.llm_service._build_client()
-        llm_with_tools = llm.bind_tools(sql_tools)
+        llm_with_tools = llm.bind_tools(sql_tools, parallel_tool_calls=False)
 
-        messages = [SystemMessage(content=SQL_AGENT_SYSTEM_PROMPT)] + list(state.messages)
+        sanitized_messages = sanitize_tool_calls_in_messages(list(state.messages))
+        messages = [SystemMessage(content=SQL_AGENT_SYSTEM_PROMPT)] + sanitized_messages
 
         try:
             response = llm_with_tools.invoke(

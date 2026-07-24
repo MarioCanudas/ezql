@@ -40,6 +40,29 @@ class TestRouteToolCalls:
         assert route_tool_calls(state) == END
 
 
+class TestSanitizeToolCallsInMessages:
+    def test_injects_missing_tool_messages(self):
+        from langchain_core.messages import ToolMessage
+        from backend.services.agent.nodes.base import sanitize_tool_calls_in_messages
+
+        messages = [
+            HumanMessage(content="hi"),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "tool1", "args": {}, "id": "call_1"},
+                    {"name": "tool2", "args": {}, "id": "call_2"},
+                ],
+            ),
+            ToolMessage(content="res1", tool_call_id="call_1"),
+        ]
+
+        sanitized = sanitize_tool_calls_in_messages(messages)
+        assert len(sanitized) == 4
+        assert isinstance(sanitized[3], ToolMessage)
+        assert sanitized[3].tool_call_id == "call_2"
+
+
 # ---------------------------------------------------------------------------
 # Graph compilation and structure
 # ---------------------------------------------------------------------------

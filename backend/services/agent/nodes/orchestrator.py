@@ -4,7 +4,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
 from backend.services.agent.state import AgentState, AgentConfiguration
-from backend.services.agent.nodes.base import NodeBase
+from backend.services.agent.nodes.base import NodeBase, sanitize_tool_calls_in_messages
 from backend.services.agent.tools import orchestrator_tools
 from backend.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 
@@ -25,9 +25,10 @@ class OrchestratorNode(NodeBase):
         )
 
         llm = agent_config.llm_service._build_client()
-        llm_with_tools = llm.bind_tools(orchestrator_tools)
+        llm_with_tools = llm.bind_tools(orchestrator_tools, parallel_tool_calls=False)
 
-        messages = [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT)] + list(state.messages)
+        sanitized_messages = sanitize_tool_calls_in_messages(list(state.messages))
+        messages = [SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT)] + sanitized_messages
 
         try:
             response = llm_with_tools.invoke(
