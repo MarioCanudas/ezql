@@ -15,11 +15,11 @@ This document provides essential context, philosophy, and technical guidelines f
 Users should never see SQL, Python, or technical execution details. The system strictly excludes `SqlBlock` from user-facing responses. The agent's output must always be human-readable business language. If a query fails, the system self-corrects via LangGraph loops or explains the issue in plain English without exposing database internals.
 
 ### 2. Clean Business Intelligence Rendering
-Internal database inspection tools (`preview_table`, `summarize_column`, `execute_advanced_sql`) execute purely in the background to inform the LLM's reasoning. They DO NOT pollute the user interface with raw preview tables. User-facing outputs consist of rich narrative Markdown and high-value presentation blocks (`ChartBlock`, `MetricBlock`, `TrendBlock`, `OutlierBlock`).
+Internal database inspection tools (`preview_table`, `summarize_column`, `execute_advanced_sql`) execute purely in the background to inform the LLM's reasoning. They DO NOT pollute the user interface with raw preview tables. User-facing outputs use only composable Markdown, metric, table and chart blocks.
 
 ### 3. Decoupled Architecture
 The project strictly separates the **Brain** (Backend) from the **Face** (Frontend).
-*   **Backend (FastAPI):** Owns logic, database connections, AI orchestration, and statistical computations. It returns a structured `AgentResponse` containing a summary and an ordered array of `UIBlock` items (`MarkdownBlock`, `MetricBlock`, `TableBlock`, `ChartBlock`, `TrendBlock`, `OutlierBlock`).
+*   **Backend (FastAPI):** Owns logic, database connections, AI orchestration, and statistical computations. It returns a structured `AgentResponse` containing a summary and an ordered array of `UIBlock` items (`MarkdownBlock`, `MetricBlock`, `TableBlock`, `ChartBlock`).
 *   **Frontend (Streamlit MVP):** Thin client responsible *only* for rendering the structured `AgentResponse` using `render_agent_response` in `frontend/components/ui.py`.
 
 ---
@@ -52,9 +52,10 @@ The project strictly separates the **Brain** (Backend) from the **Face** (Fronte
 *   **Main Entry Service:** `AnalystAgent` (`backend/services/agent/agent.py`) orchestrates execution and manages dependency context.
 *   **Dependency Passing:** Dependency objects (`UserDatabase`, `AgentChat`) are passed as un-serialized references in `config["configurable"]` to preserve Python object pointers during graph execution.
 *   **Hub-and-Spoke Topology & Planned Execution:**
-    1. **Planning:** Entry point (`START -> orchestrator`). `OrchestratorNode` builds one ordered plan using `sql`, `statistics`, and `visualization`.
-    2. **Specialist Execution:** Specialists run their tool calls independently and always return control to the Orchestrator. Tool results are stored as typed artifacts in `AgentState`; presentation artifacts include validated UI blocks.
-    3. **Structured Formatting:** When the plan is complete, the Orchestrator uses the accumulated artifacts to produce one validated `AgentResponse`.
+    1. **Planning:** Entry point (`START -> orchestrator`). `OrchestratorNode` builds an ordered queue of `PlanStep` items using `sql`, `statistics`, and `visualization`.
+    2. **Specialist Execution:** Specialists run their tool calls independently, store typed artifacts, and propose only base UI blocks. They always return control to the Orchestrator.
+    3. **Evidence Review:** When a round completes, the Orchestrator may finalize or add a bounded complementary plan using accumulated artifacts and contributions.
+    4. **Structured Formatting:** The Orchestrator deduplicates and orders the proposed base blocks into one validated `AgentResponse`.
 *   **Zero Peer Coupling:** Specialist nodes MUST NOT route to each other. All routing flows through `OrchestratorNode`.
 
 ---
@@ -69,7 +70,7 @@ To extend `AnalystAgent` with a new specialist capability (e.g., a Forecasting N
 4. **Pydantic Data Blocks (`backend/models/blocks.py`):** If adding a new visual payload, define a Pydantic model and register it in `UIBlock`.
 5. **Node Class (`backend/services/agent/nodes/<specialist>.py`):** Inherit from `NodeBase`, bind specialist tools, and invoke LLM.
 6. **Graph Wiring (`backend/services/agent/graph.py`):** Add node and tool node to `StateGraph`. Route `tools_<specialist>` back to `<specialist>`, and `<specialist>` completion back to `"orchestrator"`.
-7. **Orchestrator Prompt (`backend/prompts/orchestrator.py`):** Register the new specialist in `ORCHESTRATOR_SYSTEM_PROMPT`.
+7. **Orchestrator Prompt (`backend/prompts/orchestrator.py`):** Register the new specialist in the planner, review and formatter prompts.
 8. **AnalystAgent (`backend/services/agent/agent.py`):** Instantiate node in `AnalystAgent.__init__` and pass to `create_agent_graph()`.
 
 ---
@@ -121,8 +122,6 @@ The backend-frontend contract uses structured `AgentResponse` objects:
    * **`MarkdownBlock` (`type: "markdown"`):** Text explanation, narrative, and embedded Markdown tables.
    * **`MetricBlock` (`type: "metric"`):** KPI metric card with `label`, `value` (string), and optional `delta`.
    * **`ChartBlock` (`type: "chart"`):** Native chart with `chart_type` (`bar`, `line`, `area`, `scatter`), `x_axis`, `y_axis`, and `data` (list of dicts).
-   * **`TrendBlock` (`type: "trend"`):** Temporal trend indicator with `metric`, `pct_change`, and `direction`.
-   * **`OutlierBlock` (`type: "outliers"`):** Anomaly detection alert with `message`.
    * **`TableBlock` (`type: "table"`):** Explicit user-requested data table with `columns` and `data`.
 3. **Frontend Block Renderer (`frontend/components/ui.py`):** `render_agent_response` iterates through `blocks` and renders native Streamlit components (`st.markdown`, `st.columns` + `st.metric`, `st.bar_chart`, `st.line_chart`, `st.scatter_chart`, `st.info`).
 4. **Streamlit Component Parameters:** Use `width="stretch"` for dataframes (do NOT use deprecated `use_container_width`).
