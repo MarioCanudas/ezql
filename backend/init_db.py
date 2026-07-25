@@ -27,6 +27,10 @@ def init_db():
             session.add(Models(name="gpt-4o-mini", company="OpenAI"))
         if "deepseek-chat" not in model_names:
             session.add(Models(name="deepseek-chat", company="DeepSeek"))
+        if "deepseek-v4-pro" not in model_names:
+            session.add(Models(name="deepseek-v4-pro", company="DeepSeek"))
+        if "deepseek-v4-flash" not in model_names:
+            session.add(Models(name="deepseek-v4-flash", company="DeepSeek"))
         session.commit()
 
     print("Database initialized successfully.")

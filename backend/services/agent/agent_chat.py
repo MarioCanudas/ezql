@@ -51,6 +51,17 @@ def resolve_llm_provider(provider: str | None, model_name: str) -> str:
     return "openai"
 
 
+MODEL_ALIASES = {
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-coder": "deepseek-v4-flash",
+}
+
+
+def resolve_llm_model_name(model_name: str) -> str:
+    normalized = (model_name or "").strip().casefold()
+    return MODEL_ALIASES.get(normalized, model_name)
+
+
 class AgentChat(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -117,8 +128,9 @@ class AgentChat(BaseModel):
         if not base_url:
             base_url = config.default_base_url
 
+        resolved_model = resolve_llm_model_name(self.model_name)
         provider_key = resolve_llm_provider(self.provider, self.model_name)
-        model_lower = self.model_name.strip().casefold()
+        model_lower = resolved_model.strip().casefold()
         is_reasoning_model = (
             model_lower.startswith(("o1", "o3"))
             or "reasoner" in model_lower
@@ -126,7 +138,7 @@ class AgentChat(BaseModel):
         )
 
         client_kwargs: dict[str, object] = {
-            "model": self.model_name,
+            "model": resolved_model,
             "api_key": SecretStr(api_key),
             "base_url": base_url,
         }
