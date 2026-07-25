@@ -2,7 +2,6 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
-from backend.models.blocks import OutlierBlock, TrendBlock
 from backend.services.agent.state import AgentConfiguration
 from backend.services.agent.tool_results import tool_failure, tool_success
 
@@ -33,16 +32,10 @@ def analyze_trend(
     if "error" in result:
         return tool_failure("No fue posible calcular una tendencia con los datos disponibles.")
 
-    block = TrendBlock(
-        metric=result["metric"],
-        pct_change=result.get("pct_change"),
-        direction=result["direction"],
-    ).model_dump()
     return tool_success(
         result["message"],
         data=result,
         warnings=result.get("warnings", []),
-        blocks=[block],
     )
 
 
@@ -69,5 +62,4 @@ def detect_outliers(
         result["message"],
         data=result,
         warnings=result.get("warnings", []),
-        blocks=[OutlierBlock(message=result["message"]).model_dump()],
     )

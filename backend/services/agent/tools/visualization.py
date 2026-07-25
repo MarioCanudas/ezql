@@ -4,7 +4,6 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
-from backend.models.blocks import ChartBlock
 from backend.services.agent.state import AgentConfiguration
 from backend.services.agent.tool_results import tool_failure, tool_success
 
@@ -43,19 +42,21 @@ def _chart_result(
     if not result.rows:
         return tool_failure("No hay datos suficientes para crear esta visualización.")
 
-    block = ChartBlock(
-        chart_type=chart_type,
-        title=title,
-        x_axis=x_axis,
-        y_axis=y_axis,
-        data=result.rows,
-    ).model_dump()
     warnings = ["La visualización usa una muestra limitada de filas."] if result.truncated else []
     return tool_success(
         f"Visualización '{title}' preparada.",
-        data={"row_count": result.row_count, "truncated": result.truncated},
+        data={
+            "row_count": result.row_count,
+            "truncated": result.truncated,
+            "chart": {
+                "chart_type": chart_type,
+                "title": title,
+                "x_axis": x_axis,
+                "y_axis": y_axis,
+                "data": result.rows,
+            },
+        },
         warnings=warnings,
-        blocks=[block],
     )
 
 
@@ -89,17 +90,53 @@ def create_line_chart(
     title: str,
     config: RunnableConfig,
     limit: int = 100,
+    aggregation: Literal["none", "average", "sum", "count"] = "none",
+    bucket_size: int | None = None,
+    numeric_prefix: bool = False,
+    filter_column: str | None = None,
+    filter_value: str | None = None,
 ) -> dict:
-    """Crea una gráfica de líneas ordenada por su eje X."""
+    """Crea una gráfica de líneas; permite agregación, décadas y filtros simples."""
     safe_limit = max(1, min(limit, 100))
+    if filter_column and filter_value is None:
+        return tool_failure("Para filtrar la visualización se requiere un valor de filtro.")
+    if bucket_size is not None and not 1 <= bucket_size <= 100:
+        return tool_failure("El tamaño del período para la visualización no es válido.")
+
+    source_columns = [x_column, y_column] + ([filter_column] if filter_column else [])
+    x_expression = f'"{x_column}"'
+    x_label = x_column
+    if bucket_size:
+        x_expression = f'(CAST("{x_column}" AS INTEGER) / {bucket_size}) * {bucket_size}'
+        x_label = f"{x_column} (bloques de {bucket_size})"
+
+    numeric_expression = f'"{y_column}"'
+    if numeric_prefix:
+        numeric_expression = f'CAST(SUBSTR("{y_column}", 1, INSTR("{y_column}", " ") - 1) AS REAL)'
+    where_parts = [f'"{x_column}" IS NOT NULL', f'"{y_column}" IS NOT NULL']
+    if filter_column:
+        escaped_value = filter_value.replace("'", "''")
+        where_parts.append(f'"{filter_column}" = \'{escaped_value}\'')
+    where_clause = " AND ".join(where_parts)
+
+    if aggregation == "none":
+        metric_expression = numeric_expression
+        metric_label = y_column
+        grouping = ""
+    else:
+        aggregate_name = {"average": "AVG", "sum": "SUM", "count": "COUNT"}[aggregation]
+        aggregate_value = "*" if aggregation == "count" else numeric_expression
+        metric_label = f"{aggregation}_{y_column}" if aggregation != "count" else "count"
+        metric_expression = f"{aggregate_name}({aggregate_value})"
+        grouping = f" GROUP BY {x_expression}"
     sql = (
-        f'SELECT "{x_column}", "{y_column}" FROM "{table_name}" '
-        f'WHERE "{x_column}" IS NOT NULL AND "{y_column}" IS NOT NULL '
-        f'ORDER BY "{x_column}" LIMIT {safe_limit}'
+        f"SELECT {x_expression} AS \"{x_label}\", {metric_expression} AS \"{metric_label}\" "
+        f'FROM "{table_name}" WHERE {where_clause}{grouping} '
+        f'ORDER BY "{x_label}" LIMIT {safe_limit}'
     )
     return _chart_result(
         chart_type="line", table_name=table_name, title=title,
-        x_axis=x_column, y_axis=[y_column], source_columns=[x_column, y_column], sql=sql, config=config,
+        x_axis=x_label, y_axis=[metric_label], source_columns=source_columns, sql=sql, config=config,
     )
 
 

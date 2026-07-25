@@ -1,6 +1,6 @@
 from backend.services.agent.agent_chat import AgentChat
 from backend.services.agent.tools.statistics import analyze_trend, detect_outliers
-from backend.services.agent.tools.visualization import create_bar_chart
+from backend.services.agent.tools.visualization import create_bar_chart, create_line_chart
 from backend.services.user_database import UserDatabase
 
 
@@ -15,7 +15,7 @@ def _tool_config(database: UserDatabase, runtime_db_id: str) -> dict:
     }
 
 
-def test_trend_tool_returns_renderable_trend_block():
+def test_trend_tool_returns_evidence_without_ui_blocks():
     database = UserDatabase()
     try:
         runtime = database.register_sample_sqlite(user_id=1)
@@ -28,8 +28,8 @@ def test_trend_tool_returns_renderable_trend_block():
             config=_tool_config(database, runtime.id),
         )
         assert result["ok"] is True
-        assert result["blocks"][0]["type"] == "trend"
-        assert result["blocks"][0]["direction"] in {"up", "down", "stable"}
+        assert result["data"]["direction"] in {"up", "down", "stable"}
+        assert "blocks" not in result
     finally:
         database.close()
 
@@ -46,12 +46,12 @@ def test_statistics_tools_return_safe_failure_for_invalid_columns():
             },
             config=_tool_config(database, runtime.id),
         )
-        assert result == {"ok": False, "summary": "No fue posible evaluar anomalías con los datos disponibles.", "data": None, "warnings": [], "blocks": []}
+        assert result == {"ok": False, "summary": "No fue posible evaluar anomalías con los datos disponibles.", "data": None, "warnings": []}
     finally:
         database.close()
 
 
-def test_chart_tool_returns_a_valid_chart_block():
+def test_chart_tool_returns_chart_evidence_without_ui_block():
     database = UserDatabase()
     try:
         runtime = database.register_sample_sqlite(user_id=1)
@@ -65,7 +65,37 @@ def test_chart_tool_returns_a_valid_chart_block():
             config=_tool_config(database, runtime.id),
         )
         assert result["ok"] is True
-        assert result["blocks"][0]["type"] == "chart"
-        assert result["blocks"][0]["x_axis"] == "type"
+        assert result["data"]["chart"]["chart_type"] == "bar"
+        assert result["data"]["chart"]["x_axis"] == "type"
+    finally:
+        database.close()
+
+
+def test_line_chart_aggregates_movie_duration_by_decade():
+    database = UserDatabase()
+    try:
+        runtime = database.register_sample_sqlite(user_id=1)
+        result = create_line_chart.invoke(
+            {
+                "table_name": "netflix_titles",
+                "x_column": "release_year",
+                "y_column": "duration",
+                "title": "Duración promedio de películas por década",
+                "aggregation": "average",
+                "bucket_size": 10,
+                "numeric_prefix": True,
+                "filter_column": "type",
+                "filter_value": "Movie",
+            },
+            config=_tool_config(database, runtime.id),
+        )
+
+        assert result["ok"] is True
+        chart = result["data"]["chart"]
+        assert chart["chart_type"] == "line"
+        assert chart["x_axis"] == "release_year (bloques de 10)"
+        assert chart["y_axis"] == ["average_duration"]
+        assert chart["data"]
+        assert all("average_duration" in row for row in chart["data"])
     finally:
         database.close()
