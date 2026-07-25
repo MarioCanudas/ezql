@@ -56,7 +56,7 @@ def render(chat_id: int | None = None) -> None:
         icon=":material/info:",
     )
     st.caption(
-        "Nota: por ahora las respuestas se entregan en texto o tablas. Las gráficas todavía no están disponibles."
+        "Respuestas estructuradas en bloques interactivos: métricas, gráficas, tablas y análisis narrativo."
     )
 
     active_chat = next((chat for chat in chats if chat["id"] == chat_id), None)
@@ -182,18 +182,35 @@ def render(chat_id: int | None = None) -> None:
     if prompt := st.chat_input(
         "Escribe tu pregunta sobre los datos", disabled=runtime_db_missing
     ):
+        import time
+
         # Optimistic UI: show the user's message immediately
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        with st.status("Analizando tu consulta…", expanded=True):
+        start_time = time.time()
+        status_box = st.status("⏱️ Analizando tu consulta...", expanded=True)
+        with status_box:
             try:
                 response = api_client.create_reply(
                     chat_id=chat_id,
                     content_text=prompt,
                     user_id=user["id"],
                 )
+                elapsed = time.time() - start_time
+                status_box.update(
+                    label=f"⚡ Respuesta generada en {elapsed:.2f}s",
+                    state="complete",
+                    expanded=False,
+                )
+                st.toast(f"⏱️ Consulta completada en {elapsed:.2f}s", icon="⚡")
             except api_client.ApiError as exc:
+                elapsed = time.time() - start_time
+                status_box.update(
+                    label=f"❌ Error en la consulta ({elapsed:.2f}s)",
+                    state="error",
+                    expanded=True,
+                )
                 st.error(str(exc))
                 return
         st.rerun()

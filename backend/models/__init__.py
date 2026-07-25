@@ -1,3 +1,14 @@
+from .blocks import (
+    AgentResponse,
+    ChartBlock,
+    DataBlock,
+    MarkdownBlock,
+    MetricBlock,
+    OutlierBlock,
+    TableBlock,
+    TrendBlock,
+    UIBlock,
+)
 from .agents import AgentReply
 from .chats import ChatBase, ChatCreate, ChatRead, Chats, ChatSummary, ChatUpdate
 from .databases import DatabaseBase, DatabaseCreate, DatabaseRead, Databases
@@ -35,6 +46,15 @@ from .users import (
 
 __all__ = [
     "AgentReply",
+    "AgentResponse",
+    "ChartBlock",
+    "DataBlock",
+    "MarkdownBlock",
+    "MetricBlock",
+    "OutlierBlock",
+    "TableBlock",
+    "TrendBlock",
+    "UIBlock",
     "ChatBase",
     "ChatCreate",
     "ChatRead",

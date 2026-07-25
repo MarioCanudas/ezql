@@ -254,7 +254,11 @@ def generate_reply(
             runtime_db_id=chat.runtime_db_id,
             user_id=chat.user_id,
         )
-        assistant_content = Content(text=agent_reply.text, data=agent_reply.data)
+        assistant_content = Content(
+            text=agent_reply.text,
+            blocks=agent_reply.blocks,
+            data=agent_reply.data,
+        )
     else:
         service = AgentChat(
             model_name=model.name,
@@ -263,7 +267,7 @@ def generate_reply(
         )
         summary_service = service
         assistant_text = service.generate_reply(history, summary=chat.summary)
-        assistant_content = Content(text=assistant_text, data=None)
+        assistant_content = Content(text=assistant_text, blocks=None, data=None)
 
     assistant_message = Messages(
         chat_id=chat_id,

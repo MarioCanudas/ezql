@@ -14,7 +14,9 @@ from backend.models.blocks import FlexibleDataBlock
 
 class Content(BaseModel):
     text: str
+    blocks: list[FlexibleDataBlock] | None = None
     data: list[FlexibleDataBlock] | None = None
+
 
 
 class MessageBase(SQLModel):
