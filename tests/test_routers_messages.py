@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from backend.models import Chats, Messages, Role
+from backend.models import Chats
 
 
 class TestListMessages:

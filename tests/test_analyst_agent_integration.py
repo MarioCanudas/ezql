@@ -3,9 +3,23 @@
 from unittest.mock import MagicMock, patch
 import pytest
 
-from backend.models import AgentReply, Content, Messages, Role, AgentResponse, MarkdownBlock, MetricBlock
+from backend.models import (
+    AgentReply,
+    AgentResponse,
+    ChartBlock,
+    Content,
+    MarkdownBlock,
+    Messages,
+    MetricBlock,
+    Role,
+)
 from backend.services.agent.agent import AnalystAgent
-from backend.services.agent.state import ExecutionPlan
+from backend.services.agent.state import (
+    ExecutionPlan,
+    InvestigationDecision,
+    PlanStep,
+    SpecialistContribution,
+)
 from backend.services.user_database import UserDatabase
 from langchain_core.messages import AIMessage
 
@@ -71,7 +85,18 @@ class TestAnalystAgentIntegration:
         ]
 
         planner_llm = MagicMock()
-        planner_llm.invoke.return_value = ExecutionPlan(steps=["sql"])
+        planner_llm.invoke.return_value = ExecutionPlan(
+            steps=[PlanStep(specialist="sql", objective="Contar títulos")]
+        )
+        contribution_llm = MagicMock()
+        contribution_llm.invoke.return_value = SpecialistContribution(
+            step_id="", specialist="sql", summary="Total de títulos",
+            blocks=[MetricBlock(label="Total Títulos", value="8,808")],
+        )
+        review_llm = MagicMock()
+        review_llm.invoke.return_value = InvestigationDecision(
+            action="finalize", reason="La evidencia responde la pregunta."
+        )
         formatter_llm = MagicMock()
         formatter_llm.invoke.return_value = AgentResponse(
             summary="Hay 8,808 títulos en Netflix",
@@ -80,7 +105,9 @@ class TestAnalystAgentIntegration:
                 MarkdownBlock(content="Hay un total de 8,808 títulos en la base de datos de Netflix.")
             ]
         )
-        mock_llm.with_structured_output.side_effect = [planner_llm, formatter_llm]
+        mock_llm.with_structured_output.side_effect = [
+            planner_llm, contribution_llm, review_llm, formatter_llm
+        ]
 
         agent = AnalystAgent(
             database_service=db_service,
@@ -109,3 +136,86 @@ class TestAnalystAgentIntegration:
         assert reply.blocks is not None
         assert len(reply.blocks) == 2
         assert reply.data is not None
+
+    @patch("backend.services.agent.agent_chat.AgentChat._build_client")
+    def test_visualization_retries_without_tool_choice_and_returns_chart(
+        self, mock_build_client, real_sample_db
+    ):
+        """Thinking-compatible retry must execute a real chart tool end to end."""
+        db_service, read_db = real_sample_db
+        mock_llm = MagicMock()
+        mock_llm.bind_tools.return_value = mock_llm
+        mock_llm.invoke.side_effect = [
+            # Initial response incorrectly avoids tools; the visualization node retries.
+            AIMessage(content="No puedo generar una gráfica."),
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "create_line_chart",
+                        "args": {
+                            "table_name": "netflix_titles",
+                            "x_column": "release_year",
+                            "y_column": "duration",
+                            "title": "Duración promedio de películas por década",
+                            "aggregation": "average",
+                            "bucket_size": 10,
+                            "numeric_prefix": True,
+                            "filter_column": "type",
+                            "filter_value": "Movie",
+                        },
+                        "id": "call_chart_1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            AIMessage(content="La duración promedio varía entre décadas."),
+        ]
+        mock_build_client.return_value = mock_llm
+
+        planner_llm = MagicMock()
+        planner_llm.invoke.return_value = ExecutionPlan(
+            steps=[PlanStep(specialist="visualization", objective="Mostrar tendencia de duración")]
+        )
+        contribution_llm = MagicMock()
+        contribution_llm.invoke.return_value = SpecialistContribution(
+            step_id="",
+            specialist="visualization",
+            summary="Tendencia de duración por década.",
+            blocks=[MarkdownBlock(content="Tendencia de duración por década.")],
+        )
+        review_llm = MagicMock()
+        review_llm.invoke.return_value = InvestigationDecision(
+            action="finalize", reason="La gráfica y la evidencia responden la solicitud."
+        )
+        formatter_llm = MagicMock()
+        formatter_llm.invoke.return_value = AgentResponse(summary="Duración por década.")
+        mock_llm.with_structured_output.side_effect = [
+            planner_llm,
+            contribution_llm,
+            review_llm,
+            formatter_llm,
+        ]
+
+        agent = AnalystAgent(
+            database_service=db_service,
+            model_name="deepseek-v4",
+            provider="deepseek",
+            api_key="test-key",
+            reasoning_effort="medium",
+        )
+        reply = agent.generate_reply(
+            user_message="Analiza la duración de las películas por década.",
+            history=[],
+            summary=None,
+            runtime_db_id=read_db.id,
+            user_id=1,
+        )
+
+        assert any(isinstance(block, ChartBlock) for block in reply.blocks or [])
+        assert any(artifact["data"].get("chart") for artifact in reply.data or [])
+        assert mock_llm.invoke.call_count == 3
+        assert all(
+            call.kwargs == {"parallel_tool_calls": False}
+            for call in mock_llm.bind_tools.call_args_list
+        )
