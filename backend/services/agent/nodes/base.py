@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import SystemMessage
+from pydantic import ValidationError
 from backend.services.agent.state import AgentState
+from backend.services.agent.state import AgentConfiguration, SpecialistName
+from backend.services.agent.agent_chat import LLMGenerationError
 
 
 def sanitize_tool_calls_in_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -57,3 +61,38 @@ class NodeBase(ABC):
             A dictionary with updates to the agent state.
         """
         pass
+
+
+class SpecialistNodeBase(NodeBase):
+    """Shared execution loop for a tool-using specialist."""
+
+    step: ClassVar[SpecialistName]
+    system_prompt: ClassVar[str]
+    tools: ClassVar[list]
+
+    def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+        try:
+            agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
+        except ValidationError as exc:
+            raise ValueError(f"Invalid configuration in config['configurable']: {exc}") from exc
+
+        agent_config.database_service.get_database(
+            agent_config.runtime_db_id, user_id=agent_config.user_id
+        )
+        llm = agent_config.llm_service._build_client()
+        messages = [SystemMessage(content=self.system_prompt)] + sanitize_tool_calls_in_messages(
+            list(state.messages)
+        )
+        try:
+            response = llm.bind_tools(self.tools, parallel_tool_calls=False).invoke(
+                messages, config={"configurable": config.get("configurable", {})}
+            )
+        except Exception as exc:
+            raise LLMGenerationError(
+                f"El especialista no pudo completar el análisis solicitado: {exc}"
+            ) from exc
+
+        update: dict[str, Any] = {"messages": [response]}
+        if not getattr(response, "tool_calls", None) and self.step not in state.completed_steps:
+            update["completed_steps"] = [self.step]
+        return update

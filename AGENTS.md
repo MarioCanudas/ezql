@@ -5,23 +5,22 @@ This document provides essential context, philosophy, and technical guidelines f
 ## Project Overview
 **EzQL** is an autonomous data analyst interface. Its primary goal is to democratize data analytics by allowing users to interact with their databases using natural language. 
 
-**Key Distinction:** EzQL is **not** a Text-to-SQL converter for developers. It is a business intelligence tool for end-users. It must deliver answers, insights, and visualizations—never raw code.
+**Key Distinction:** EzQL is **not** a Text-to-SQL converter for developers. It is a business intelligence tool for end-users. It must deliver answers, insights, and visualizations—never raw code or raw SQL.
 
 ---
 
 ## Philosophy & Core Principles
 
 ### 1. Total Code Abstraction
-Users should never see SQL, Python, or any technical artifacts. The agent's output must always be human-readable business language. If a query fails, the system should attempt to self-correct (via LangGraph's agentic loops) or explain the issue in plain English without exposing database internals.
+Users should never see SQL, Python, or technical execution details. The system strictly excludes `SqlBlock` from user-facing responses. The agent's output must always be human-readable business language. If a query fails, the system self-corrects via LangGraph loops or explains the issue in plain English without exposing database internals.
 
-### 2. Implicit Statistical Intelligence
-EzQL goes beyond simple data retrieval. It should proactively apply statistical methods when relevant. 
-*   **Example:** If asked "How are sales doing?", the backend shouldn't just sum sales; it should consider trends, identify outliers, or perform a t-test if comparing periods, translating these results into "Sales have increased significantly (p < 0.05)" rather than "The sum is X".
+### 2. Clean Business Intelligence Rendering
+Internal database inspection tools (`preview_table`, `summarize_column`, `execute_advanced_sql`) execute purely in the background to inform the LLM's reasoning. They DO NOT pollute the user interface with raw preview tables. User-facing outputs consist of rich narrative Markdown and high-value presentation blocks (`ChartBlock`, `MetricBlock`, `TrendBlock`, `OutlierBlock`).
 
 ### 3. Decoupled Architecture
 The project strictly separates the **Brain** (Backend) from the **Face** (Frontend).
-*   **Backend (FastAPI):** Owns all logic, database connections, AI orchestration, and statistical computations. It must return rich, structured JSON that includes text summaries, data tables, and chart specifications.
-*   **Frontend (Streamlit MVP):** Acts as a thin client. It is responsible *only* for rendering the structured data received from the API. It should not contain business logic or direct database access.
+*   **Backend (FastAPI):** Owns logic, database connections, AI orchestration, and statistical computations. It returns a structured `AgentResponse` containing a summary and an ordered array of `UIBlock` items (`MarkdownBlock`, `MetricBlock`, `TableBlock`, `ChartBlock`, `TrendBlock`, `OutlierBlock`).
+*   **Frontend (Streamlit MVP):** Thin client responsible *only* for rendering the structured `AgentResponse` using `render_agent_response` in `frontend/components/ui.py`.
 
 ---
 
@@ -31,79 +30,47 @@ The project strictly separates the **Brain** (Backend) from the **Face** (Fronte
 *   **[uv](https://github.com/astral-sh/uv):** Used for all package management. Always use `uv sync` or `uv add` for dependencies.
 
 ### AI Orchestration
-*   **LangGraph & LangChain:** The core engine (`backend/services/agent/`). We use stateful LangGraph workflows with a Hub-and-Spoke architecture centered around an `OrchestratorNode` and specialist sub-nodes (`SqlNode`, `StatisticsNode`, `VisualizationNode`).
-*   **Agentic Loops:** Implementation relies on iterative refinement within LangGraph tool calls. If a generated SQL query is invalid, the agent catches the error and retries.
+*   **LangGraph & LangChain:** The core engine (`backend/services/agent/`). Stateful LangGraph workflow with a Hub-and-Spoke architecture centered around `OrchestratorNode` and specialist sub-nodes (`SqlNode`, `StatisticsNode`, `VisualizationNode`).
+*   **Agentic Loops & Self-Correction:** Iterative refinement within LangGraph tool calls. SQL errors are caught and retried automatically.
 
 ### API & Data Validation
-*   **FastAPI:** High-performance asynchronous backend.
-*   **Pydantic:** Strictly used for data validation and defining the contract between backend and frontend.
-
-### Frontend
-*   **Streamlit:** Used for the MVP. It should be used to render Markdown, DataFrames, metrics, and Plotly/Altair charts based on the backend's instructions.
+*   **FastAPI & Pydantic v2:** High-performance asynchronous backend and strict data contracts defined in `backend/models/blocks.py`.
 
 ---
 
 ## Backend Architecture Standards
-The backend follows a strict separation of paradigms between the API layer, generic services, and the agent ecosystem.
 
 ### 1. API Layer (FastAPI Routers)
-*   **Functional & Thin Controllers:** Routers (`backend/routers/`) must be purely functional. Do not instantiate classes globally or within the routes.
-*   **Dependency Injection:** All services must be injected using FastAPI's `Depends()`. 
-*   **Global Exception Handling:** Do not use `try...except` blocks in routes to handle domain errors (e.g., `RuntimeDatabaseError`). Let exceptions bubble up to be caught by global handlers in `main.py` (`@app.exception_handler`).
+*   **Functional Controllers:** Routers (`backend/routers/`) must be purely functional. Services are injected using `Depends()`.
+*   **Global Exception Handling:** Do not use `try...except` in routes for domain errors (e.g., `RuntimeDatabaseError`). Let exceptions bubble to `@app.exception_handler` in `main.py`.
 
 ### 2. General Services Layer
-*   **OOP without Interfaces:** Business logic (`backend/services/`) is encapsulated in standard Python classes (e.g., `UserDatabase`). Do not enforce redundant Abstract Base Classes or interfaces unless absolutely necessary.
-*   **Naming Convention:** Do NOT append `_service` to class or file names (e.g., use `UserDatabase` in `user_database.py`, NOT `UserDatabaseService`).
-*   **Service Registry:** Services are cached and managed using a Singleton `ServiceRegistry` in `backend/utils/dependencies.py`. Never attach services directly to `request.app.state`.
+*   **OOP Service Objects:** Business logic (`backend/services/`) is encapsulated in standard Python classes. Never append `_service` to file/class names.
+*   **Service Registry:** Services are managed via a Singleton `ServiceRegistry` in `backend/utils/dependencies.py`.
 
 ### 3. Agent Ecosystem (LangGraph - Hub-and-Spoke Architecture)
-*   **Main Entry Service:** `AnalystAgent` (`backend/services/agent/agent.py`) orchestrates graph execution and handles initial state assembly.
-*   **Hub-and-Spoke Topology:**
-    *   **Orchestrator Node (`OrchestratorNode`):** The central hub and graph entry point (`START -> orchestrator`). It analyzes user intent and delegates to specialists via delegation tools (`delegate_to_sql`, `delegate_to_statistics`, `delegate_to_visualization`) returning `Command(goto=...)`.
-    *   **Specialist Nodes (`SqlNode`, `StatisticsNode`, `VisualizationNode`):** Focused domain nodes equipped with dedicated toolkits. Once execution finishes, control automatically routes back to `OrchestratorNode`.
-    *   **Zero Peer-to-Peer Coupling:** Specialist nodes MUST NOT know about each other or expose `transfer_to_*` tools to other specialists. All cross-domain orchestration passes through `OrchestratorNode`.
-*   **Strict Contracts:** Nodes (`backend/services/agent/nodes/`) MUST inherit from `NodeBase`.
-*   **Type Safety & Fail Fast:** Dependency injection for the graph must be done via `RunnableConfig` using strictly validated Pydantic models (e.g., `AgentConfiguration` in `state.py`). Validate critical requirements (like API keys or DB existence) *before* entering LLM loops.
-*   **Decoupled Tools:** LangChain tools (`@tool`) must be fully decoupled from the Nodes. They belong in `backend/services/agent/tools/` and extract context from `RunnableConfig`.
+*   **Main Entry Service:** `AnalystAgent` (`backend/services/agent/agent.py`) orchestrates execution and manages dependency context.
+*   **Dependency Passing:** Dependency objects (`UserDatabase`, `AgentChat`) are passed as un-serialized references in `config["configurable"]` to preserve Python object pointers during graph execution.
+*   **Hub-and-Spoke Topology & Planned Execution:**
+    1. **Planning:** Entry point (`START -> orchestrator`). `OrchestratorNode` builds one ordered plan using `sql`, `statistics`, and `visualization`.
+    2. **Specialist Execution:** Specialists run their tool calls independently and always return control to the Orchestrator. Tool results are stored as typed artifacts in `AgentState`; presentation artifacts include validated UI blocks.
+    3. **Structured Formatting:** When the plan is complete, the Orchestrator uses the accumulated artifacts to produce one validated `AgentResponse`.
+*   **Zero Peer Coupling:** Specialist nodes MUST NOT route to each other. All routing flows through `OrchestratorNode`.
 
 ---
 
 ## Rules for Adding New Specialist Nodes
 
-To extend `AnalystAgent` with a new specialist capability (e.g., a Forecasting Node), follow this exact implementation protocol:
+To extend `AnalystAgent` with a new specialist capability (e.g., a Forecasting Node):
 
-1. **System Prompt (`backend/prompts/<specialist>.py`):**
-   * Create the prompt file defining the specialist's role, domain limits, and formatting rules.
-   * Export the prompt in `backend/prompts/__init__.py`.
-
-2. **Domain Tools (`backend/services/agent/tools/<specialist>.py`):**
-   * Implement domain tools using the `@tool` decorator, retrieving `AgentConfiguration` via `RunnableConfig`.
-   * Export the specialist tool list in `backend/services/agent/tools/__init__.py`.
-
-3. **Orchestrator Delegation Tool (`backend/services/agent/tools/orchestrator.py`):**
-   * Add a tool function `delegate_to_<specialist>()` returning `Command(goto="<specialist>")`.
-   * Add it to `orchestrator_tools` in `backend/services/agent/tools/__init__.py`.
-
-4. **Pydantic Data Blocks (if applicable) (`backend/models/blocks.py`):**
-   * If the node outputs custom visual payloads to the frontend, define a new Pydantic block model (e.g., `ForecastBlock`).
-   * Include the new block in the `DataBlock` discriminated union.
-
-5. **Node Class (`backend/services/agent/nodes/<specialist>.py`):**
-   * Implement `<Specialist>Node` inheriting from `NodeBase`.
-   * Bind the specialist's tools to the LLM client and invoke with the specialist system prompt.
-   * Export the node class in `backend/services/agent/nodes/__init__.py`.
-
-6. **Graph Wiring (`backend/services/agent/graph.py`):**
-   * Instantiate `ToolNode(<specialist>_tools)`.
-   * Add node `<specialist>` and node `tools_<specialist>` to the `StateGraph`.
-   * Add conditional edge routing `<specialist>` to `tools_<specialist>` if tool calls exist, or back to `"orchestrator"` on completion.
-   * Add edge from `tools_<specialist>` back to `<specialist>`.
-
-7. **Orchestrator Prompt Registration (`backend/prompts/orchestrator.py`):**
-   * Update `ORCHESTRATOR_SYSTEM_PROMPT` to describe the new specialist's responsibilities so the Orchestrator knows when to delegate to it.
-
-8. **AnalystAgent Integration (`backend/services/agent/agent.py`):**
-   * Instantiate `self.<specialist>_node` inside `AnalystAgent.__init__` and pass it to `create_agent_graph()`.
+1. **System Prompt (`backend/prompts/<specialist>.py`):** Define the specialist's role, limits, and formatting rules.
+2. **Domain Tools (`backend/services/agent/tools/<specialist>.py`):** Implement tools with `@tool` and return structured results. Presentation tools include validated UI blocks; internal inspection tools must not create raw preview blocks.
+3. **Orchestrator Planning:** Register the specialist in the planner prompt and `SpecialistName` state type.
+4. **Pydantic Data Blocks (`backend/models/blocks.py`):** If adding a new visual payload, define a Pydantic model and register it in `UIBlock`.
+5. **Node Class (`backend/services/agent/nodes/<specialist>.py`):** Inherit from `NodeBase`, bind specialist tools, and invoke LLM.
+6. **Graph Wiring (`backend/services/agent/graph.py`):** Add node and tool node to `StateGraph`. Route `tools_<specialist>` back to `<specialist>`, and `<specialist>` completion back to `"orchestrator"`.
+7. **Orchestrator Prompt (`backend/prompts/orchestrator.py`):** Register the new specialist in `ORCHESTRATOR_SYSTEM_PROMPT`.
+8. **AnalystAgent (`backend/services/agent/agent.py`):** Instantiate node in `AnalystAgent.__init__` and pass to `create_agent_graph()`.
 
 ---
 
@@ -115,40 +82,47 @@ ezql/
 │   ├── main.py              # Entrypoint & Global Exception Handlers
 │   ├── routers/             # Functional Thin Controllers
 │   ├── models/              # Shared API schemas and SQL entities
-│   │   └── blocks.py        # Typed DataBlock schemas for UI rendering
+│   │   └── blocks.py        # Typed UIBlock & AgentResponse schemas
 │   ├── prompts/             # System prompts for Orchestrator & Specialists
 │   ├── utils/               # ServiceRegistry & DI Providers
 │   └── services/            # Business Logic & OOP Service Objects
 │       └── agent/           # LangGraph ecosystem
 │           ├── agent.py     # AnalystAgent entrypoint service
+│           ├── agent_chat.py# ChatOpenAI wrapper & provider resolver
 │           ├── graph.py     # Hub-and-Spoke StateGraph compilation
 │           ├── state.py     # AgentState & AgentConfiguration
 │           ├── nodes/       # OrchestratorNode & Specialist Nodes
 │           └── tools/       # Orchestrator & Specialist Toolkits
 └── frontend/                # The UI Layer (Streamlit)
     ├── app.py               # Main interface
-    └── components/          # Reusable UI elements
+    ├── pages/               # Streamlit multipage views
+    └── components/          # Reusable UI elements (ui.py block renderer)
 ```
 
 ---
 
 ## Guidelines for Agents
 
-1.  **Maintain Abstraction:** When writing code for the backend, ensure error messages sent to the frontend are user-friendly.
-2.  **Statistically Driven:** When implementing data retrieval, look for opportunities to add "Invisible Analytics" (trend analysis, anomaly detection).
-3.  **API-First & Functional:** Ensure new features are implemented in the service layer first, then exposed via a functional FastAPI endpoint relying on `Depends()`.
-4.  **Type Safety & Fail Fast:** Use Pydantic models for all API exchanges and internal Graph configurations. Catch invalid states immediately rather than deep within execution loops.
-5.  **Strict File Naming:** Never name files or classes with `_service` suffix in the `backend/services/` directory. Use absolute imports pointing to directories where possible.
-6.  **Efficient Searching:** Always use `ripgrep` (e.g. via the agent `grep_search` tool) instead of conventional `grep` when searching for text across the project to improve performance.
+1.  **Maintain Total Abstraction:** Never expose SQL, code, or technical traces to the user. `SqlBlock` is explicitly removed from response schemas.
+2.  **Clean UI Output:** Internal database queries (`preview_table`, `execute_advanced_sql`) must never create raw `TableBlock`s. Only dedicated visualization/analytics tools should produce visual UI blocks.
+3.  **API-First & Functional:** Implement features in the service layer first, exposed via thin FastAPI endpoints.
+4.  **Type Safety & Fail Fast:** Validate dependencies with `AgentConfiguration` and Pydantic models.
+5.  **Strict File Naming:** Never name files or classes with `_service` suffix in `backend/services/`.
+6.  **Efficient Searching:** Always use `ripgrep` (`grep_search`) for codebase text searches.
 
 ---
 
 ## UI Rendering & Tool Contracts
 
-The contract between the LangGraph backend and the Streamlit frontend is **strictly typed**. AI Agents must adhere to the following data exchange and rendering rules:
+The backend-frontend contract uses structured `AgentResponse` objects:
 
-1. **Visual Formatting via Markdown:** Agents have full control over visual formatting in the text response. They must use Markdown (including Markdown tables, bold text, and lists) to structure their answers cleanly.
-2. **Strict Pydantic Blocks:** Tools (`@tool`) must NEVER append raw dictionaries or generic lists to `query_data_ref`. They must instantiate and append formal Pydantic blocks from `backend/models/blocks.py` (e.g., `TableBlock`, `MetricBlock`, `TrendBlock`, `OutlierBlock`, `ChartBlock`) using `.model_dump()`.
-3. **Frontend Rendering Logic:** The frontend (`frontend/components/ui.py`) renders the Markdown text generated by the agent. It also renders specific statistical data blocks (`TrendBlock`, `MetricBlock`, `OutlierBlock`, `ChartBlock`) using native Streamlit components (like `st.metric`). However, it intentionally ignores `TableBlock` and raw legacy tables to avoid visual duplication, as the agent is expected to render tabular data via Markdown.
-4. **DataBlock Fallbacks:** To ensure backward compatibility, the `AgentReply` and `Content` models use `FlexibleDataBlock` (a discriminated union based on the `"type"` key). This enforces types for new messages while preventing `ValidationError` crashes on historical unstructured chats.
-5. **Streamlit Component Widths:** Do NOT use the deprecated `use_container_width` parameter for Streamlit components. Instead, use the `width` parameter (e.g., `width="stretch"` instead of `use_container_width=True`, and `width="content"` instead of `use_container_width=False`).
+1. **`AgentResponse` Schema:** Contains `summary: str` (one-sentence executive summary) and `blocks: list[UIBlock]`.
+2. **`UIBlock` Types:**
+   * **`MarkdownBlock` (`type: "markdown"`):** Text explanation, narrative, and embedded Markdown tables.
+   * **`MetricBlock` (`type: "metric"`):** KPI metric card with `label`, `value` (string), and optional `delta`.
+   * **`ChartBlock` (`type: "chart"`):** Native chart with `chart_type` (`bar`, `line`, `area`, `scatter`), `x_axis`, `y_axis`, and `data` (list of dicts).
+   * **`TrendBlock` (`type: "trend"`):** Temporal trend indicator with `metric`, `pct_change`, and `direction`.
+   * **`OutlierBlock` (`type: "outliers"`):** Anomaly detection alert with `message`.
+   * **`TableBlock` (`type: "table"`):** Explicit user-requested data table with `columns` and `data`.
+3. **Frontend Block Renderer (`frontend/components/ui.py`):** `render_agent_response` iterates through `blocks` and renders native Streamlit components (`st.markdown`, `st.columns` + `st.metric`, `st.bar_chart`, `st.line_chart`, `st.scatter_chart`, `st.info`).
+4. **Streamlit Component Parameters:** Use `width="stretch"` for dataframes (do NOT use deprecated `use_container_width`).

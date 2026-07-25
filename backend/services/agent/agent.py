@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from backend.models import AgentReply, Messages
+from backend.models import AgentReply, Messages, AgentResponse, MarkdownBlock
 from backend.services.agent.agent_chat import (
     AgentChat,
     LLMGenerationError,
@@ -65,7 +65,10 @@ class AnalystAgent:
     ) -> AgentReply:
         message = user_message.strip()
         if not message:
-            return AgentReply(text="Escribe una pregunta sobre tu base de datos.")
+            return AgentReply(
+                text="Escribe una pregunta sobre tu base de datos.",
+                blocks=[MarkdownBlock(content="Escribe una pregunta sobre tu base de datos.")],
+            )
 
         chat_messages = []
         if summary:
@@ -79,17 +82,12 @@ class AnalystAgent:
 
         initial_state = AgentState(messages=chat_messages)
 
-        from backend.services.agent.state import AgentConfiguration
-        agent_config = AgentConfiguration(
-            database_service=self.database_service,
-            llm_service=self.llm_service,
-            runtime_db_id=runtime_db_id,
-            user_id=user_id,
-        )
-
-        query_data_ref = []
-        config_dict = agent_config.model_dump()
-        config_dict["query_data_ref"] = query_data_ref
+        config_dict = {
+            "database_service": self.database_service,
+            "llm_service": self.llm_service,
+            "runtime_db_id": runtime_db_id,
+            "user_id": user_id,
+        }
 
         try:
             response = self.graph.invoke(
@@ -109,4 +107,26 @@ class AnalystAgent:
                 f"Error al generar la respuesta del asistente: {exc}"
             ) from exc
 
-        return AgentReply(text=text_response, data=query_data_ref)
+        parsed_response = self._extract_agent_response(response, text_response)
+
+        return AgentReply(
+            text=parsed_response.summary,
+            response=parsed_response,
+            blocks=parsed_response.blocks,
+            data=[artifact.model_dump() for artifact in response.get("artifacts", [])],
+        )
+
+    def _extract_agent_response(
+        self, graph_output: dict, fallback_text: str
+    ) -> AgentResponse:
+        """Reads the final validated response from graph state."""
+        response = graph_output.get("response")
+        if isinstance(response, dict):
+            try:
+                return AgentResponse.model_validate(response)
+            except Exception:
+                pass
+        return AgentResponse(
+            summary=fallback_text,
+            blocks=[MarkdownBlock(content=fallback_text)],
+        )

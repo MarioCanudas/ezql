@@ -24,6 +24,7 @@ from .orchestrator import (
 from .visualization import (
     create_bar_chart,
     create_line_chart,
+    create_scatter_chart,
 )
 
 sql_tools = [
@@ -52,6 +53,7 @@ orchestrator_tools = [
 visualization_tools = [
     create_bar_chart,
     create_line_chart,
+    create_scatter_chart,
 ]
 
 __all__ = [
