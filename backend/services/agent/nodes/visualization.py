@@ -7,3 +7,4 @@ class VisualizationNode(SpecialistNodeBase):
     step = "visualization"
     system_prompt = VISUALIZATION_SYSTEM_PROMPT
     tools = visualization_tools
+    require_initial_tool_call = True

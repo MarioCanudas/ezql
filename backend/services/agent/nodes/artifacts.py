@@ -38,7 +38,6 @@ class ArtifactCollectorNode(NodeBase):
                     summary=str(payload["summary"]),
                     data=payload.get("data"),
                     warnings=list(payload.get("warnings", [])),
-                    blocks=list(payload.get("blocks", [])),
                 )
             )
 

@@ -7,7 +7,7 @@ from backend.services.agent.nodes.orchestrator import OrchestratorNode
 from backend.services.agent.nodes.sql import SqlNode
 from backend.services.agent.nodes.statistics import StatisticsNode
 from backend.services.agent.nodes.visualization import VisualizationNode
-from backend.services.agent.state import AgentState
+from backend.services.agent.state import AgentState, PlanStep
 
 
 # ---------------------------------------------------------------------------
@@ -39,33 +39,29 @@ class TestRouteToolCalls:
 
 class TestPlanRouting:
     def test_routes_to_first_pending_specialist(self):
-        state = AgentState(plan_created=True, plan=["sql", "statistics"])
+        state = AgentState(pending_steps=[PlanStep(specialist="sql", objective="Descubrir datos")])
         assert route_after_orchestrator(state) == "sql"
 
     def test_routes_to_second_specialist_after_sql(self):
         state = AgentState(
-            plan_created=True, plan=["sql", "statistics"], completed_steps=["sql"]
+            pending_steps=[PlanStep(specialist="statistics", objective="Analizar datos")],
         )
         assert route_after_orchestrator(state) == "statistics"
 
     def test_routes_sql_statistics_then_visualization(self):
         state = AgentState(
-            plan_created=True,
-            plan=["sql", "statistics", "visualization"],
-            completed_steps=["sql", "statistics"],
+            pending_steps=[PlanStep(specialist="visualization", objective="Visualizar datos")],
         )
         assert route_after_orchestrator(state) == "visualization"
 
     def test_routes_sql_then_visualization(self):
         state = AgentState(
-            plan_created=True,
-            plan=["sql", "visualization"],
-            completed_steps=["sql"],
+            pending_steps=[PlanStep(specialist="visualization", objective="Visualizar datos")],
         )
         assert route_after_orchestrator(state) == "visualization"
 
     def test_returns_to_orchestrator_for_final_formatting(self):
-        state = AgentState(plan_created=True, plan=["sql"], completed_steps=["sql"])
+        state = AgentState(planning_started=True)
         assert route_after_orchestrator(state) == "orchestrator"
 
 

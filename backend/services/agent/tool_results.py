@@ -12,7 +12,6 @@ class ToolResult(BaseModel):
     summary: str
     data: Any = None
     warnings: list[str] = Field(default_factory=list)
-    blocks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def tool_success(
@@ -20,14 +19,12 @@ def tool_success(
     *,
     data: Any = None,
     warnings: list[str] | None = None,
-    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return ToolResult(
         ok=True,
         summary=summary,
         data=data,
         warnings=warnings or [],
-        blocks=blocks or [],
     ).model_dump()
 
 

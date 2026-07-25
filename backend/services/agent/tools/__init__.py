@@ -15,12 +15,6 @@ from .statistics import (
     detect_outliers,
 )
 
-from .orchestrator import (
-    delegate_to_sql,
-    delegate_to_statistics,
-    delegate_to_visualization,
-)
-
 from .visualization import (
     create_bar_chart,
     create_line_chart,
@@ -44,12 +38,6 @@ statistics_tools = [
     detect_outliers,
 ]
 
-orchestrator_tools = [
-    delegate_to_sql,
-    delegate_to_statistics,
-    delegate_to_visualization,
-]
-
 visualization_tools = [
     create_bar_chart,
     create_line_chart,
@@ -59,6 +47,5 @@ visualization_tools = [
 __all__ = [
     "sql_tools",
     "statistics_tools",
-    "orchestrator_tools",
     "visualization_tools",
 ]

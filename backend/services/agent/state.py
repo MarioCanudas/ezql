@@ -4,6 +4,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from backend.services.user_database import UserDatabase
 from backend.services.agent.agent_chat import AgentChat
+from backend.models.blocks import UIBlock
 
 
 class AgentConfiguration(BaseModel):
@@ -33,21 +34,42 @@ class ToolArtifact(BaseModel):
     summary: str
     data: Any = None
     warnings: list[str] = Field(default_factory=list)
-    blocks: list[dict[str, Any]] = Field(default_factory=list)
+class PlanStep(BaseModel):
+    id: str = ""
+    specialist: SpecialistName
+    objective: str = Field(min_length=1)
 
 
 class ExecutionPlan(BaseModel):
-    """Small, ordered plan produced once by the orchestrator for each request."""
+    """Ordered work proposed by the orchestrator for one investigation round."""
 
-    steps: list[SpecialistName] = Field(default_factory=list, max_length=3)
-    clarification: str | None = None
+    steps: list[PlanStep] = Field(default_factory=list, max_length=3)
+
+
+class InvestigationDecision(BaseModel):
+    action: Literal["continue", "finalize"]
+    reason: str
+    steps: list[PlanStep] = Field(default_factory=list, max_length=3)
+
+
+class SpecialistContribution(BaseModel):
+    """Composable, evidence-backed pieces proposed by one specialist."""
+
+    step_id: str
+    specialist: SpecialistName
+    summary: str
+    artifact_ids: list[str] = Field(default_factory=list)
+    blocks: list[UIBlock] = Field(default_factory=list)
 
 
 class AgentState(BaseModel):
     messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
-    plan: list[SpecialistName] = Field(default_factory=list)
-    plan_created: bool = False
-    completed_steps: Annotated[list[SpecialistName], append_data] = Field(default_factory=list)
+    planning_started: bool = False
+    plan_round: int = 0
+    replan_count: int = 0
+    pending_steps: list[PlanStep] = Field(default_factory=list)
+    completed_steps: Annotated[list[PlanStep], append_data] = Field(default_factory=list)
     artifacts: Annotated[list[ToolArtifact], append_data] = Field(default_factory=list)
     processed_tool_call_ids: Annotated[list[str], append_data] = Field(default_factory=list)
+    contributions: Annotated[list[SpecialistContribution], append_data] = Field(default_factory=list)
     response: dict[str, Any] | None = None

@@ -14,11 +14,11 @@ def route_tool_calls(state: AgentState) -> str:
 
 
 def route_after_orchestrator(state: AgentState) -> str:
-    if not state.plan_created:
+    if state.response:
         return "end"
-    if len(state.completed_steps) >= len(state.plan):
-        return "end" if state.response else "orchestrator"
-    return state.plan[len(state.completed_steps)]
+    if state.pending_steps:
+        return state.pending_steps[0].specialist
+    return "orchestrator"
 
 
 def create_agent_graph(
@@ -45,7 +45,13 @@ def create_agent_graph(
     workflow.add_conditional_edges(
         "orchestrator",
         route_after_orchestrator,
-        {"sql": "sql", "statistics": "statistics", "visualization": "visualization", "orchestrator": "orchestrator", "end": END},
+        {
+            "sql": "sql",
+            "statistics": "statistics",
+            "visualization": "visualization",
+            "orchestrator": "orchestrator",
+            "end": END,
+        },
     )
     for specialist, tools, collector_name in (
         ("sql", "tools_sql", "collect_sql"),
