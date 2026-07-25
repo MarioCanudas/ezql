@@ -192,7 +192,7 @@ def render(chat_id: int | None = None) -> None:
         status_box = st.status("⏱️ Analizando tu consulta...", expanded=True)
         with status_box:
             try:
-                response = api_client.create_reply(
+                api_client.create_reply(
                     chat_id=chat_id,
                     content_text=prompt,
                     user_id=user["id"],
@@ -214,4 +214,3 @@ def render(chat_id: int | None = None) -> None:
                 st.error(str(exc))
                 return
         st.rerun()
-

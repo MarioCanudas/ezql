@@ -79,19 +79,23 @@ def render_agent_response(response_json: dict[str, Any]) -> None:
                 elif chart_type == "scatter":
                     st.scatter_chart(df, x=x_axis, y=y_axis)
 
-        elif block_type == "trend":
-            st.info(
-                f"**Tendencia temporal**: {block.get('metric', '')} - "
-                f"Dirección: {block.get('direction', '')}"
-            )
-            pct = block.get("pct_change")
-            if pct is not None:
-                st.caption(f"Cambio: {pct}%")
-
-        elif block_type == "outliers":
-            st.info(f"**Anomalías**: {block.get('message', '')}")
+        elif block_type in {"trend", "outliers"}:
+            _render_legacy_block(block)
 
         i += 1
+
+
+def _render_legacy_block(block: dict[str, Any]) -> None:
+    """Render historical block types without making them part of the new contract."""
+    if block.get("type") == "trend":
+        st.info(
+            f"**Tendencia temporal**: {block.get('metric', '')} - "
+            f"Dirección: {block.get('direction', '')}"
+        )
+        if (pct := block.get("pct_change")) is not None:
+            st.caption(f"Cambio: {pct}%")
+    elif block.get("type") == "outliers":
+        st.info(f"**Anomalías**: {block.get('message', '')}")
 
 
 def render_chat_messages(messages: list[dict[str, Any]]) -> None:
