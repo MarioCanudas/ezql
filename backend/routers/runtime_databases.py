@@ -3,7 +3,6 @@ from fastapi import (
     Depends,
     File,
     Form,
-    HTTPException,
     Query,
     UploadFile,
     status,
@@ -12,8 +11,6 @@ from fastapi import (
 from backend.models import RuntimeDatabaseRead, RuntimeDatabaseSchema
 from backend.services.user_database import (
     MAX_UPLOAD_BYTES,
-    RuntimeDatabaseError,
-    RuntimeDatabaseNotFoundError,
     UserDatabase,
 )
 from backend.utils.dependencies import get_runtime_database_service
