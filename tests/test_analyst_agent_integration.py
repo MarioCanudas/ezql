@@ -3,10 +3,11 @@
 from unittest.mock import MagicMock, patch
 import pytest
 
-from backend.models import AgentReply, Content, Messages, Role
+from backend.models import AgentReply, Content, Messages, Role, AgentResponse, MarkdownBlock, MetricBlock
 from backend.services.agent.agent import AnalystAgent
+from backend.services.agent.state import ExecutionPlan
 from backend.services.user_database import UserDatabase
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage
 
 
 @pytest.fixture(name="real_sample_db")
@@ -43,24 +44,13 @@ class TestAnalystAgentIntegration:
         mock_llm = MagicMock()
         mock_build_client.return_value = mock_llm
 
-        # Step 1: Orchestrator delegates to SQL Specialist
+        # Step 1: planner creates the SQL plan
         # Step 2: SQL Specialist calls execute_advanced_sql tool
-        # Step 3: SQL Specialist receives tool output and returns final answer
+        # Step 3: SQL Specialist finishes analysis
+        # Step 4: formatter emits the final block response
         mock_llm.bind_tools.return_value = mock_llm
         mock_llm.invoke.side_effect = [
-            # 1. Orchestrator response -> delegate to sql
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": "delegate_to_sql",
-                        "args": {},
-                        "id": "call_orch_1",
-                        "type": "tool_call",
-                    }
-                ],
-            ),
-            # 2. SqlNode response -> execute_advanced_sql
+            # 1. SqlNode response -> execute_advanced_sql
             AIMessage(
                 content="",
                 tool_calls=[
@@ -74,11 +64,23 @@ class TestAnalystAgentIntegration:
                     }
                 ],
             ),
-            # 3. SqlNode response -> final answer
+            # 2. SqlNode response -> final analysis text
             AIMessage(
                 content="Hay un total de 8,808 títulos en la base de datos de Netflix.",
             ),
         ]
+
+        planner_llm = MagicMock()
+        planner_llm.invoke.return_value = ExecutionPlan(steps=["sql"])
+        formatter_llm = MagicMock()
+        formatter_llm.invoke.return_value = AgentResponse(
+            summary="Hay 8,808 títulos en Netflix",
+            blocks=[
+                MetricBlock(label="Total Títulos", value="8,808"),
+                MarkdownBlock(content="Hay un total de 8,808 títulos en la base de datos de Netflix.")
+            ]
+        )
+        mock_llm.with_structured_output.side_effect = [planner_llm, formatter_llm]
 
         agent = AnalystAgent(
             database_service=db_service,
@@ -92,7 +94,7 @@ class TestAnalystAgentIntegration:
             chat_id=1,
             role=Role.user,
             content=Content(text=user_message_str, data=None).model_dump(),
-        )  # type: ignore[call-arg]
+        )
 
         reply = agent.generate_reply(
             user_message=user_message_str,
@@ -104,5 +106,6 @@ class TestAnalystAgentIntegration:
 
         assert isinstance(reply, AgentReply)
         assert "8,808" in reply.text
+        assert reply.blocks is not None
+        assert len(reply.blocks) == 2
         assert reply.data is not None
-        assert len(reply.data) > 0  # TableBlock captured from execute_advanced_sql

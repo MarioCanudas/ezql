@@ -1,11 +1,8 @@
 """Tests for the LangGraph agent graph structure and routing."""
 
-from unittest.mock import MagicMock
-
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.graph import END
 
-from backend.services.agent.graph import create_agent_graph, route_tool_calls
+from backend.services.agent.graph import create_agent_graph, route_after_orchestrator, route_tool_calls
 from backend.services.agent.nodes.orchestrator import OrchestratorNode
 from backend.services.agent.nodes.sql import SqlNode
 from backend.services.agent.nodes.statistics import StatisticsNode
@@ -19,13 +16,13 @@ from backend.services.agent.state import AgentState
 
 
 class TestRouteToolCalls:
-    def test_empty_messages_returns_end(self):
+    def test_empty_messages_returns_next(self):
         state = AgentState(messages=[])
-        assert route_tool_calls(state) == END
+        assert route_tool_calls(state) == "next"
 
-    def test_no_tool_calls_returns_end(self):
+    def test_no_tool_calls_returns_next(self):
         state = AgentState(messages=[AIMessage(content="Hello")])
-        assert route_tool_calls(state) == END
+        assert route_tool_calls(state) == "next"
 
     def test_with_tool_calls_returns_tools(self):
         msg = AIMessage(
@@ -35,9 +32,41 @@ class TestRouteToolCalls:
         state = AgentState(messages=[msg])
         assert route_tool_calls(state) == "tools"
 
-    def test_human_message_returns_end(self):
+    def test_human_message_returns_next(self):
         state = AgentState(messages=[HumanMessage(content="hi")])
-        assert route_tool_calls(state) == END
+        assert route_tool_calls(state) == "next"
+
+
+class TestPlanRouting:
+    def test_routes_to_first_pending_specialist(self):
+        state = AgentState(plan_created=True, plan=["sql", "statistics"])
+        assert route_after_orchestrator(state) == "sql"
+
+    def test_routes_to_second_specialist_after_sql(self):
+        state = AgentState(
+            plan_created=True, plan=["sql", "statistics"], completed_steps=["sql"]
+        )
+        assert route_after_orchestrator(state) == "statistics"
+
+    def test_routes_sql_statistics_then_visualization(self):
+        state = AgentState(
+            plan_created=True,
+            plan=["sql", "statistics", "visualization"],
+            completed_steps=["sql", "statistics"],
+        )
+        assert route_after_orchestrator(state) == "visualization"
+
+    def test_routes_sql_then_visualization(self):
+        state = AgentState(
+            plan_created=True,
+            plan=["sql", "visualization"],
+            completed_steps=["sql"],
+        )
+        assert route_after_orchestrator(state) == "visualization"
+
+    def test_returns_to_orchestrator_for_final_formatting(self):
+        state = AgentState(plan_created=True, plan=["sql"], completed_steps=["sql"])
+        assert route_after_orchestrator(state) == "orchestrator"
 
 
 class TestSanitizeToolCallsInMessages:
@@ -94,10 +123,12 @@ class TestAgentGraph:
             "sql",
             "statistics",
             "visualization",
-            "tools_orchestrator",
             "tools_sql",
             "tools_statistics",
             "tools_visualization",
+            "collect_sql",
+            "collect_statistics",
+            "collect_visualization",
         }
         # All expected nodes must be present
         assert expected.issubset(node_names), f"Missing nodes: {expected - node_names}"
