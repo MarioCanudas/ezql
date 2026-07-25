@@ -8,9 +8,7 @@ from backend.models.blocks import (
     ChartBlock,
     MarkdownBlock,
     MetricBlock,
-    OutlierBlock,
     TableBlock,
-    TrendBlock,
     UIBlock,
 )
 

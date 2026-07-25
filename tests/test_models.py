@@ -16,12 +16,9 @@ from backend.models import (
 )
 from backend.models.blocks import (
     ChartBlock,
-    DataBlock,
     MarkdownBlock,
     MetricBlock,
-    OutlierBlock,
     TableBlock,
-    TrendBlock,
     UIBlock,
 )
 
@@ -100,17 +97,10 @@ class TestDataBlock:
         )
         assert isinstance(block, MetricBlock)
 
-    def test_trend_block(self):
-        block = self.adapter.validate_python(
-            {"type": "trend", "metric": "Revenue", "pct_change": 5.2, "direction": "up"}
-        )
-        assert isinstance(block, TrendBlock)
-
-    def test_outlier_block(self):
-        block = self.adapter.validate_python(
-            {"type": "outliers", "message": "2 outliers found"}
-        )
-        assert isinstance(block, OutlierBlock)
+    @pytest.mark.parametrize("block_type", ["trend", "outliers"])
+    def test_specialized_blocks_are_rejected(self, block_type: str):
+        with pytest.raises(ValidationError):
+            self.adapter.validate_python({"type": block_type, "message": "legacy"})
 
     def test_chart_block(self):
         block = self.adapter.validate_python(
@@ -167,17 +157,16 @@ class TestBlockValidation:
         with pytest.raises(ValidationError):
             MetricBlock(type="metric")  # type: ignore[call-arg]
 
-    def test_trend_requires_direction(self):
-        with pytest.raises(ValidationError):
-            TrendBlock(type="trend", metric="X")  # type: ignore[call-arg]
-
-    def test_outlier_requires_message(self):
-        with pytest.raises(ValidationError):
-            OutlierBlock(type="outliers")  # type: ignore[call-arg]
-
     def test_chart_requires_fields(self):
         with pytest.raises(ValidationError):
             ChartBlock(type="chart")  # type: ignore[call-arg]
+
+    def test_content_preserves_legacy_specialized_block_as_dict(self):
+        content = Content(
+            text="histórico",
+            blocks=[{"type": "trend", "metric": "ventas", "direction": "up"}],
+        )
+        assert isinstance(content.blocks[0], dict)  # type: ignore[index]
 
 
 # ---------------------------------------------------------------------------

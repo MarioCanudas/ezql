@@ -4,9 +4,7 @@ from .blocks import (
     DataBlock,
     MarkdownBlock,
     MetricBlock,
-    OutlierBlock,
     TableBlock,
-    TrendBlock,
     UIBlock,
 )
 from .agents import AgentReply
@@ -51,9 +49,7 @@ __all__ = [
     "DataBlock",
     "MarkdownBlock",
     "MetricBlock",
-    "OutlierBlock",
     "TableBlock",
-    "TrendBlock",
     "UIBlock",
     "ChatBase",
     "ChatCreate",

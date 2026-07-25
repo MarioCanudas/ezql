@@ -4,20 +4,17 @@ from enum import Enum
 from pydantic import BaseModel, JsonValue
 from sqlmodel import JSON, Field, SQLModel
 
+from backend.models.blocks import FlexibleDataBlock
+
 
 class Role(str, Enum):
     user = "user"
     assistant = "agent"
 
-
-from backend.models.blocks import FlexibleDataBlock
-
 class Content(BaseModel):
     text: str
     blocks: list[FlexibleDataBlock] | None = None
     data: list[FlexibleDataBlock] | None = None
-
-
 
 class MessageBase(SQLModel):
     chat_id: int = Field(foreign_key="chats.id", index=True)

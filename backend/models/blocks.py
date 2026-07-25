@@ -29,21 +29,9 @@ class ChartBlock(BaseModel):
     y_axis: list[str] = Field(description="Lista de nombres de columnas para el eje Y")
     data: list[dict[str, Any]] = Field(description="Conjunto de datos a graficar")
 
-# 5. Bloque de Tendencia
-class TrendBlock(BaseModel):
-    type: Literal["trend"] = "trend"
-    metric: str = Field(description="Nombre de la métrica analizada")
-    pct_change: float | None = Field(default=None, description="Porcentaje de cambio")
-    direction: str = Field(description="Dirección de la tendencia (up, down, stable)")
-
-# 6. Bloque de Anomalías / Outliers
-class OutlierBlock(BaseModel):
-    type: Literal["outliers"] = "outliers"
-    message: str = Field(description="Descripción de las anomalías encontradas")
-
 # Discriminador de tipos de bloque
 UIBlock = Annotated[
-    MarkdownBlock | MetricBlock | TableBlock | ChartBlock | TrendBlock | OutlierBlock,
+    MarkdownBlock | MetricBlock | TableBlock | ChartBlock,
     Field(discriminator="type")
 ]
 
