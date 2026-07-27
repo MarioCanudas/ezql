@@ -5,6 +5,26 @@ import pandas as pd
 import streamlit as st
 
 
+MISSING_VALUE = "Dato no disponible"
+
+
+def resolve_metadata_template(value: Any, metadata: dict[str, Any] | None) -> Any:
+    """Resolve references without modifying the persisted message payload."""
+    if not isinstance(value, str) or "{{meta." not in value:
+        return value
+    import re
+
+    metadata = metadata or {}
+
+    def replace(match: re.Match[str]) -> str:
+        entry = metadata.get(match.group(1))
+        if not isinstance(entry, dict) or entry.get("display") is None:
+            return MISSING_VALUE
+        return str(entry["display"])
+
+    return re.sub(r"\{\{meta\.([A-Za-z0-9_.-]+)\}\}", replace, value)
+
+
 def role_to_streamlit(role: str) -> str:
     if role == "agent":
         return "assistant"
@@ -14,10 +34,11 @@ def role_to_streamlit(role: str) -> str:
 def render_agent_response(response_json: dict[str, Any]) -> None:
     """Itera sobre la lista de bloques e invoca el componente de Streamlit adecuado."""
     blocks = response_json.get("blocks", [])
+    metadata = response_json.get("metadata")
     if not blocks:
         text = response_json.get("summary") or response_json.get("text")
         if text:
-            st.markdown(text)
+            st.markdown(resolve_metadata_template(text, metadata))
         return
 
     i = 0
@@ -40,13 +61,13 @@ def render_agent_response(response_json: dict[str, Any]) -> None:
             for idx, m in enumerate(metric_group):
                 cols[idx].metric(
                     label=m.get("label", ""),
-                    value=m.get("value", ""),
-                    delta=m.get("delta"),
+                    value=resolve_metadata_template(m.get("value", ""), metadata),
+                    delta=resolve_metadata_template(m.get("delta"), metadata),
                 )
             continue  # Continuar sin incrementar i nuevamente
 
         elif block_type == "markdown":
-            st.markdown(block.get("content", ""))
+            st.markdown(resolve_metadata_template(block.get("content", ""), metadata))
 
         elif block_type == "table":
             if block.get("title"):
@@ -105,14 +126,14 @@ def render_chat_messages(messages: list[dict[str, Any]]) -> None:
         with st.chat_message(role):
             blocks = content.get("blocks")
             if blocks:
-                render_agent_response({"blocks": blocks, "summary": content.get("text")})
+                render_agent_response({"blocks": blocks, "summary": content.get("text"), "metadata": content.get("metadata")})
             else:
                 text = content.get("text", "")
                 if text:
-                    st.markdown(text)
+                    st.markdown(resolve_metadata_template(text, content.get("metadata")))
                 data = content.get("data") or []
                 if data:
-                    render_agent_response({"blocks": data, "summary": text})
+                    render_agent_response({"blocks": data, "summary": text, "metadata": content.get("metadata")})
 
 
 def select_from_options(

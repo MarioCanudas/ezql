@@ -91,12 +91,14 @@ def render() -> None:
             index=model_index,
             format_func=lambda value: model_map[value],
         )
-        source = st.radio(
+        source = st.selectbox(
             "Origen de datos",
-            options=["sample", "upload"],
+            options=["netflix", "uber", "upload"],
             format_func=lambda value: (
                 "Usar base de prueba Netflix"
-                if value == "sample"
+                if value == "netflix"
+                else "Usar base de prueba Uber Ride Analytics"
+                if value == "uber"
                 else "Subir archivo SQLite .db"
             ),
         )
@@ -116,7 +118,7 @@ def render() -> None:
             )
         else:
             st.info(
-                "La base de prueba incluida siempre está disponible para validar el flujo antes de subir tus datos."
+                "La base de prueba seleccionada está disponible para explorar el flujo antes de subir tus datos."
             )
 
         submitted = st.form_submit_button("Crear chat", type="primary")
@@ -130,8 +132,11 @@ def render() -> None:
 
     try:
         db_id = None
-        if source == "sample":
-            runtime_db = api_client.register_sample_database(user_id=user_id)
+        if source in {"netflix", "uber"}:
+            runtime_db = api_client.register_sample_database(
+                user_id=user_id,
+                sample_name=source,
+            )
             try:
                 db_list = api_client.list_databases(user_id=user_id)
                 associated_db = next(
@@ -142,7 +147,7 @@ def render() -> None:
                     )),
                     None
                 )
-                if associated_db:
+                if associated_db and source == "netflix":
                     db_id = associated_db["id"]
             except Exception:
                 pass

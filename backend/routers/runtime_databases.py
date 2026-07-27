@@ -41,9 +41,14 @@ def list_runtime_databases(
 def register_sample_database(
     user_id: int = Form(...),
     runtime_id: str | None = Form(default=None),
+    sample_name: str = Form(default="netflix"),
     service: UserDatabase = Depends(get_runtime_database_service),
 ):
-    return service.register_sample_sqlite(user_id=user_id, runtime_id=runtime_id)
+    return service.register_sample_sqlite(
+        user_id=user_id,
+        runtime_id=runtime_id,
+        sample_name=sample_name,
+    )
 
 
 @router.post(
