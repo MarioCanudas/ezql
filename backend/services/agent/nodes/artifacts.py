@@ -7,6 +7,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 
 from backend.services.agent.nodes.base import NodeBase
+from backend.services.agent.metadata import build_artifact_metadata, presentation_catalog
 from backend.services.agent.state import AgentState, ToolArtifact
 
 
@@ -30,6 +31,7 @@ class ArtifactCollectorNode(NodeBase):
                 continue
             if not isinstance(payload, dict) or "ok" not in payload or "summary" not in payload:
                 continue
+            metadata, candidates = presentation_catalog(message.tool_call_id, payload.get("data"))
             artifacts.append(
                 ToolArtifact(
                     tool_call_id=message.tool_call_id,
@@ -38,6 +40,9 @@ class ArtifactCollectorNode(NodeBase):
                     summary=str(payload["summary"]),
                     data=payload.get("data"),
                     warnings=list(payload.get("warnings", [])),
+                    metadata=metadata,
+                    debug_metadata=build_artifact_metadata(message.tool_call_id, payload.get("data")),
+                    presentation_candidates=candidates,
                 )
             )
 

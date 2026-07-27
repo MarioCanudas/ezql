@@ -12,6 +12,7 @@ from backend.services.agent.state import (
     SpecialistName,
 )
 from backend.services.agent.agent_chat import LLMGenerationError
+from backend.services.agent.metadata import sanitize_generated_block, state_metadata
 
 
 def sanitize_tool_calls_in_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -76,6 +77,9 @@ class SpecialistNodeBase(NodeBase):
     tools: ClassVar[list]
     require_initial_tool_call: ClassVar[bool] = False
 
+    def context_messages(self, state: AgentState, active_step) -> list[SystemMessage]:
+        return []
+
     def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
@@ -100,7 +104,7 @@ class SpecialistNodeBase(NodeBase):
                     + "\nUsa solo evidencia verificada por tus herramientas."
                 )
             ),
-        ] + sanitize_tool_calls_in_messages(list(state.messages))
+        ] + self.context_messages(state, active_step) + sanitize_tool_calls_in_messages(list(state.messages))
         tool_names = {tool.name for tool in self.tools}
         has_tool_attempt = any(
             any(
@@ -143,18 +147,22 @@ class SpecialistNodeBase(NodeBase):
         if getattr(response, "tool_calls", None):
             return {"messages": [response]}
 
+        available_metadata = state_metadata(state.artifacts)
         contribution_prompt = messages + [response, SystemMessage(content="""
 Convierte los hallazgos verificados en piezas de presentación reutilizables.
-Solo puedes proponer MarkdownBlock, MetricBlock, TableBlock o ChartBlock.
+Propón solo narrativa MarkdownBlock; las métricas, tablas y gráficas provienen
+de candidatos validados por herramientas.
 No crees tipos especializados para tendencias, anomalías o metodología.
 Describe tendencias, anomalías, advertencias y recomendaciones en Markdown.
 Nunca afirmes que EzQL no puede generar gráficas: una limitación solo se comunica
 si una herramienta devolvió un fallo verificable para esta solicitud concreta.
-Si incluyes una gráfica, copia exactamente el objeto `chart` de la evidencia
-verificada. No inventes filas, métricas ni valores.
-Si la herramienta de visualización devolvió un objeto `chart` válido, DEBES
-incluir ese ChartBlock: la aplicación puede renderizarlo directamente.
+Para cifras, porcentajes, importes y fechas factuales que cites en la narrativa,
+prefiere referencias con la forma {{meta.clave}} de la metadata verificada
+disponible. El texto explicativo normal sigue siendo válido.
 """.strip())]
+        contribution_prompt.append(
+            SystemMessage(content="[METADATA_VERIFICADA]\n" + str(sorted(available_metadata)))
+        )
         artifact_ids = [artifact.tool_call_id for artifact in state.artifacts if artifact.ok]
         try:
             contribution = llm.with_structured_output(
@@ -178,6 +186,12 @@ incluir ese ChartBlock: la aplicación puede renderizarlo directamente.
                 artifact_ids=artifact_ids,
                 blocks=[MarkdownBlock(content=narrative)],
             )
+
+        contribution.blocks = [
+            sanitize_generated_block(block, available_metadata)
+            for block in contribution.blocks
+            if block.type == "markdown"
+        ]
 
         return {
             "messages": [response],

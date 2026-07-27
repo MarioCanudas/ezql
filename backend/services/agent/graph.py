@@ -17,6 +17,8 @@ def route_after_orchestrator(state: AgentState) -> str:
     if state.response:
         return "end"
     if state.pending_steps:
+        if state.pending_steps[0].specialist == "statistics":
+            return "authorize_statistics"
         return state.pending_steps[0].specialist
     return "orchestrator"
 
@@ -25,6 +27,7 @@ def create_agent_graph(
     orchestrator_node: NodeBase,
     sql_node: NodeBase,
     statistics_node: NodeBase,
+    statistics_grant_node: NodeBase,
     visualization_node: NodeBase,
 ):
     workflow = StateGraph(AgentState)
@@ -33,6 +36,7 @@ def create_agent_graph(
     workflow.add_node("orchestrator", orchestrator_node)
     workflow.add_node("sql", sql_node)
     workflow.add_node("statistics", statistics_node)
+    workflow.add_node("authorize_statistics", statistics_grant_node)
     workflow.add_node("visualization", visualization_node)
     workflow.add_node("tools_sql", ToolNode(sql_tools))
     workflow.add_node("tools_statistics", ToolNode(statistics_tools))
@@ -48,11 +52,13 @@ def create_agent_graph(
         {
             "sql": "sql",
             "statistics": "statistics",
+            "authorize_statistics": "authorize_statistics",
             "visualization": "visualization",
             "orchestrator": "orchestrator",
             "end": END,
         },
     )
+    workflow.add_edge("authorize_statistics", "statistics")
     for specialist, tools, collector_name in (
         ("sql", "tools_sql", "collect_sql"),
         ("statistics", "tools_statistics", "collect_statistics"),

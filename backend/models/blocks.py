@@ -1,5 +1,6 @@
 from typing import Annotated, Literal, Any
 from pydantic import BaseModel, Field
+from backend.models.metadata import MessageMetadata
 
 # 1. Bloque de Texto / Markdown
 class MarkdownBlock(BaseModel):
@@ -43,3 +44,4 @@ FlexibleDataBlock = UIBlock | dict[str, Any] | list[Any]
 class AgentResponse(BaseModel):
     summary: str = Field(description="Resumen corto o respuesta principal en una oración.")
     blocks: list[UIBlock] = Field(default_factory=list, description="Lista secuencial ordenada de elementos visuales a renderizar.")
+    metadata: MessageMetadata = Field(default_factory=dict, description="Hechos verificados referenciables desde los bloques.")

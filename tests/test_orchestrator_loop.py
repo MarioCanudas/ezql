@@ -1,20 +1,26 @@
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from backend.models.blocks import AgentResponse, MarkdownBlock
+from backend.models.blocks import AgentResponse, MarkdownBlock, MetricBlock
+from backend.models.metadata import MetadataValue
 from backend.services.agent.agent_chat import AgentChat
 from backend.services.agent.nodes.orchestrator import (
     OrchestratorNode,
     _contribution_blocks,
+    _enforce_statistics_step,
     _enforce_visualization_step,
 )
+from backend.services.agent.nodes.artifacts import ArtifactCollectorNode
+from backend.services.agent.metadata import MISSING_VALUE, safe_template
 from backend.services.agent.nodes.visualization import VisualizationNode
 from backend.services.agent.state import (
     AgentState,
     InvestigationDecision,
     PlanStep,
     SpecialistContribution,
+    PresentationCandidate,
+    ResponseSelection,
     ToolArtifact,
 )
 from backend.services.user_database import UserDatabase
@@ -124,6 +130,143 @@ def test_explicit_chart_request_always_includes_sql_and_visualization_steps():
     )
 
     assert [step.specialist for step in steps] == ["sql", "visualization"]
+
+
+def test_statistical_intent_cannot_be_planned_as_sql_only():
+    steps = _enforce_statistics_step(
+        [PlanStep(specialist="sql", objective="Consultar ventas")],
+        [HumanMessage(content="¿Cuál es la tendencia mensual y el promedio de ventas?")],
+    )
+
+    assert [step.specialist for step in steps] == ["sql", "statistics"]
+
+
+def test_statistical_chart_orders_evidence_before_visualization():
+    steps = _enforce_statistics_step(
+        _enforce_visualization_step(
+            [], [HumanMessage(content="Grafica la evolución y distribución de ventas")]
+        ),
+        [HumanMessage(content="Grafica la evolución y distribución de ventas")],
+    )
+
+    assert [step.specialist for step in steps] == ["sql", "statistics", "visualization"]
+
+
+def test_artifact_catalog_keeps_only_presentable_facts_and_provenance():
+    state = AgentState(
+        messages=[
+            ToolMessage(
+                content=(
+                    '{"ok": true, "summary": "Conteo disponible.", "data": '
+                    '{"total": 42, "suggested_blocks": [{"type": "metric", '
+                    '"label": "Total", "value": "42", "delta": null}]}}'
+                ),
+                tool_call_id="call-count",
+                name="count_rows",
+            )
+        ]
+    )
+
+    update = ArtifactCollectorNode()(state, {})
+    metadata = update["artifacts"][0].metadata
+
+    assert len(metadata) == 1
+    fact = next(iter(metadata.values()))
+    assert fact.value == "42"
+    assert fact.artifact_id == "call-count"
+    assert update["artifacts"][0].presentation_candidates[0].fact_keys == list(metadata)
+
+
+def test_template_preserves_natural_narrative_and_replaces_only_invalid_reference():
+    assert safe_template("El total es 42", {}) == "El total es 42"
+    assert safe_template("El total es {{meta.call-count.data.total}}", {
+        "call-count.data.total": MagicMock(),
+    }) == "El total es {{meta.call-count.data.total}}"
+    assert safe_template("Total {{meta.inexistente}}; tendencia estable.", {}) == (
+        f"Total {MISSING_VALUE}; tendencia estable."
+    )
+
+
+def test_invalid_candidate_selection_falls_back_to_verified_candidates_in_order():
+    metadata = {
+        "call-1.fact.total.0": MetadataValue(
+            value="42", display="42", artifact_id="call-1", path="data.suggested_blocks.0.value"
+        )
+    }
+    candidate = PresentationCandidate(
+        id="call-1.block.0",
+        tool_call_id="call-1",
+        block=MetricBlock(label="Total", value="{{meta.call-1.fact.total.0}}"),
+        fact_keys=["call-1.fact.total.0"],
+    )
+    from backend.services.agent.nodes.orchestrator import _selected_presentation
+
+    blocks, selected = _selected_presentation(
+        [candidate], ResponseSelection(summary="Hay datos.", candidate_ids=["no-existe"]), metadata
+    )
+
+    assert blocks == [candidate.block]
+    assert selected == metadata
+
+
+@patch("backend.services.agent.agent_chat.AgentChat._build_client")
+def test_orchestrator_uses_only_selected_verified_candidates(mock_build_client):
+    database = UserDatabase()
+    try:
+        runtime = database.register_sample_sqlite(user_id=1)
+        metadata = {
+            "call-1.fact.total.0": MetadataValue(
+                value="42", display="42", artifact_id="call-1", path="data.suggested_blocks.0.value"
+            )
+        }
+        first = PresentationCandidate(
+            id="call-1.block.0",
+            tool_call_id="call-1",
+            block=MetricBlock(label="Total", value="{{meta.call-1.fact.total.0}}"),
+            fact_keys=["call-1.fact.total.0"],
+        )
+        second = PresentationCandidate(
+            id="call-1.block.1",
+            tool_call_id="call-1",
+            block=MarkdownBlock(content="Bloque verificado."),
+        )
+        selection_llm = MagicMock()
+        selection_llm.invoke.return_value = ResponseSelection(
+            summary="El total es {{meta.call-1.fact.total.0}}.",
+            narrative="Resultado verificado.",
+            candidate_ids=[second.id, first.id],
+        )
+        llm = MagicMock()
+        llm.with_structured_output.return_value = selection_llm
+        mock_build_client.return_value = llm
+
+        result = OrchestratorNode()(
+            AgentState(
+                planning_started=True,
+                plan_round=3,
+                replan_count=2,
+                artifacts=[
+                    ToolArtifact(
+                        tool_call_id="call-1",
+                        ok=True,
+                        summary="Resultado disponible.",
+                        metadata=metadata,
+                        presentation_candidates=[first, second],
+                    )
+                ],
+            ),
+            _config(database, runtime.id),
+        )
+
+        assert result["response"]["summary"] == "El total es {{meta.call-1.fact.total.0}}."
+        assert [block["type"] for block in result["response"]["blocks"]] == [
+            "markdown", "markdown", "metric"
+        ]
+        assert result["response"]["metadata"] == {
+            key: value.model_dump() for key, value in metadata.items()
+        }
+    finally:
+        database.close()
 
 
 @patch("backend.services.agent.agent_chat.AgentChat._build_client")

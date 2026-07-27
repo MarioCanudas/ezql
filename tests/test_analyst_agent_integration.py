@@ -91,7 +91,7 @@ class TestAnalystAgentIntegration:
         contribution_llm = MagicMock()
         contribution_llm.invoke.return_value = SpecialistContribution(
             step_id="", specialist="sql", summary="Total de títulos",
-            blocks=[MetricBlock(label="Total Títulos", value="8,808")],
+            blocks=[MetricBlock(label="Total Títulos", value="{{meta.call_sql_1.data.rows_preview.0.total}}")],
         )
         review_llm = MagicMock()
         review_llm.invoke.return_value = InvestigationDecision(
@@ -99,10 +99,10 @@ class TestAnalystAgentIntegration:
         )
         formatter_llm = MagicMock()
         formatter_llm.invoke.return_value = AgentResponse(
-            summary="Hay 8,808 títulos en Netflix",
+            summary="Hay {{meta.call_sql_1.data.rows_preview.0.total}} títulos en Netflix",
             blocks=[
-                MetricBlock(label="Total Títulos", value="8,808"),
-                MarkdownBlock(content="Hay un total de 8,808 títulos en la base de datos de Netflix.")
+                MetricBlock(label="Total Títulos", value="{{meta.call_sql_1.data.rows_preview.0.total}}"),
+                MarkdownBlock(content="Hay {{meta.call_sql_1.data.rows_preview.0.total}} títulos en la base de datos de Netflix.")
             ]
         )
         mock_llm.with_structured_output.side_effect = [
@@ -132,7 +132,10 @@ class TestAnalystAgentIntegration:
         )
 
         assert isinstance(reply, AgentReply)
-        assert "8,808" in reply.text
+        # Raw SQL previews are not promoted as presentation facts. An obsolete
+        # flattened reference degrades locally, without discarding the response.
+        assert reply.text == "Hay Dato no disponible títulos en Netflix"
+        assert reply.metadata == {}
         assert reply.blocks is not None
         assert len(reply.blocks) == 2
         assert reply.data is not None

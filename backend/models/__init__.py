@@ -7,6 +7,13 @@ from .blocks import (
     TableBlock,
     UIBlock,
 )
+from .statistics import (
+    AnalysisFilter,
+    AnalysisScope,
+    DatasetGrantDescriptor,
+    StatisticsDatasetRequest,
+)
+from .metadata import MessageMetadata, MetadataValue
 from .agents import AgentReply
 from .chats import ChatBase, ChatCreate, ChatRead, Chats, ChatSummary, ChatUpdate
 from .databases import DatabaseBase, DatabaseCreate, DatabaseRead, Databases
@@ -51,6 +58,12 @@ __all__ = [
     "MetricBlock",
     "TableBlock",
     "UIBlock",
+    "AnalysisFilter",
+    "AnalysisScope",
+    "DatasetGrantDescriptor",
+    "StatisticsDatasetRequest",
+    "MessageMetadata",
+    "MetadataValue",
     "ChatBase",
     "ChatCreate",
     "ChatRead",

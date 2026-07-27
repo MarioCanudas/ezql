@@ -249,6 +249,7 @@ def generate_reply(
             text=agent_reply.text,
             blocks=agent_reply.blocks,
             data=agent_reply.data,
+            metadata=agent_reply.metadata,
         )
     else:
         service = AgentChat(

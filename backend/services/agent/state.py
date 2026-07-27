@@ -5,6 +5,9 @@ from langgraph.graph.message import add_messages
 from backend.services.user_database import UserDatabase
 from backend.services.agent.agent_chat import AgentChat
 from backend.models.blocks import UIBlock
+from backend.models.metadata import MessageMetadata
+from backend.models.statistics import DatasetGrantDescriptor
+from backend.services.agent.statistics_grants import StatisticsGrantStore
 
 
 class AgentConfiguration(BaseModel):
@@ -18,6 +21,7 @@ class AgentConfiguration(BaseModel):
     llm_service: AgentChat
     runtime_db_id: str
     user_id: int
+    statistics_grants: StatisticsGrantStore = Field(default_factory=StatisticsGrantStore)
 
 
 def append_data(left: list, right: list) -> list:
@@ -27,6 +31,15 @@ def append_data(left: list, right: list) -> list:
 SpecialistName = Literal["sql", "statistics", "visualization"]
 
 
+class PresentationCandidate(BaseModel):
+    """A tool-validated block the orchestrator may select for the final response."""
+
+    id: str
+    tool_call_id: str
+    block: UIBlock
+    fact_keys: list[str] = Field(default_factory=list)
+
+
 class ToolArtifact(BaseModel):
     tool_call_id: str
     tool_name: str | None = None
@@ -34,6 +47,21 @@ class ToolArtifact(BaseModel):
     summary: str
     data: Any = None
     warnings: list[str] = Field(default_factory=list)
+    # Semantic facts are the only metadata exposed to the LLM and UI.
+    metadata: MessageMetadata = Field(default_factory=dict)
+    # Flattened values remain available for internal diagnosis only.
+    debug_metadata: MessageMetadata = Field(default_factory=dict, exclude=True)
+    presentation_candidates: list[PresentationCandidate] = Field(default_factory=list)
+
+
+class ResponseSelection(BaseModel):
+    """LLM-selected, evidence-backed composition of a final response."""
+
+    summary: str
+    narrative: str = ""
+    candidate_ids: list[str] = Field(default_factory=list)
+
+
 class PlanStep(BaseModel):
     id: str = ""
     specialist: SpecialistName
@@ -72,4 +100,5 @@ class AgentState(BaseModel):
     artifacts: Annotated[list[ToolArtifact], append_data] = Field(default_factory=list)
     processed_tool_call_ids: Annotated[list[str], append_data] = Field(default_factory=list)
     contributions: Annotated[list[SpecialistContribution], append_data] = Field(default_factory=list)
+    statistics_grants: Annotated[list[DatasetGrantDescriptor], append_data] = Field(default_factory=list)
     response: dict[str, Any] | None = None
