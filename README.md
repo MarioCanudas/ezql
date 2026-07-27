@@ -129,16 +129,18 @@ In the current MVP, EzQL analyzes **SQLite** files (`.db`, `.sqlite`, `.sqlite3`
 You can:
 
 - **Upload a SQLite file** when creating a new chat.
-- Use a **bundled sample dataset** (Netflix).
+- Use a **bundled sample dataset** (Netflix or Uber Ride Analytics).
 
 Important runtime behavior:
 
 - Uploaded SQLite files are treated as **temporary runtime databases**.
 - If the backend process restarts, you must upload the SQLite file again (and typically recreate the chat).
 
-#### Netflix sample database (not committed)
+#### Bundled sample databases (not committed)
 
-For safety, the SQLite file `frontend/test_data/netflix.db` is **not committed** to the repo (all `*.db` files are ignored). The repo includes the CSV dataset at `frontend/test_data/netflix_titles.csv`.
+For safety, the SQLite files in `frontend/test_data/` are **not committed** to the repo (all `*.db` files are ignored). The repo includes the CSV datasets `netflix_titles.csv` and `ncr_ride_bookings.csv`.
+
+The application offers both samples in **Nuevo chat**. The Uber sample is exposed as the `uber_ride_bookings` table and is ready for questions about booking status, vehicle type, revenue, cancellations, distance, and ratings.
 
 To build the sample database locally:
 

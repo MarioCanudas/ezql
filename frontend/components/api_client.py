@@ -271,8 +271,9 @@ def register_sample_database(
     *,
     user_id: int,
     runtime_id: str | None = None,
+    sample_name: str = "netflix",
 ) -> dict[str, Any]:
-    data = {"user_id": str(user_id)}
+    data = {"user_id": str(user_id), "sample_name": sample_name}
     if runtime_id is not None:
         data["runtime_id"] = runtime_id
     return _request_multipart(

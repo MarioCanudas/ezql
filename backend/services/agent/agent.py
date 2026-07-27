@@ -16,6 +16,8 @@ from backend.services.agent.nodes.orchestrator import OrchestratorNode
 from backend.services.agent.nodes.sql import SqlNode
 from backend.services.agent.nodes.statistics import StatisticsNode
 from backend.services.agent.nodes.visualization import VisualizationNode
+from backend.services.agent.nodes.statistics_grant import StatisticsGrantNode
+from backend.services.agent.statistics_grants import StatisticsGrantStore
 
 
 class AnalystAgent:
@@ -44,12 +46,15 @@ class AnalystAgent:
         self.orchestrator_node = OrchestratorNode()
         self.sql_node = SqlNode()
         self.statistics_node = StatisticsNode()
+        self.statistics_grant_node = StatisticsGrantNode()
         self.visualization_node = VisualizationNode()
+        self.statistics_grants = StatisticsGrantStore()
 
         self.graph = create_agent_graph(
             self.orchestrator_node,
             self.sql_node,
             self.statistics_node,
+            self.statistics_grant_node,
             self.visualization_node,
         )
 
@@ -87,6 +92,7 @@ class AnalystAgent:
             "llm_service": self.llm_service,
             "runtime_db_id": runtime_db_id,
             "user_id": user_id,
+            "statistics_grants": self.statistics_grants,
         }
 
         try:
@@ -114,6 +120,7 @@ class AnalystAgent:
             response=parsed_response,
             blocks=parsed_response.blocks,
             data=[artifact.model_dump() for artifact in response.get("artifacts", [])],
+            metadata=parsed_response.metadata,
         )
 
     def _extract_agent_response(

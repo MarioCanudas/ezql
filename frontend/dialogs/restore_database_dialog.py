@@ -13,7 +13,9 @@ def restore_database_dialog(*, runtime_db_id: str, user_id: int) -> None:
         "Origen de datos",
         options=["sample", "upload"],
         format_func=lambda value: (
-            "Usar base de prueba Netflix"
+            "Usar base de prueba Uber Ride Analytics"
+            if value == "sample" and runtime_db_id.startswith("sample-uber-")
+            else "Usar base de prueba Netflix"
             if value == "sample"
             else "Subir archivo SQLite .db"
         ),
@@ -27,6 +29,11 @@ def restore_database_dialog(*, runtime_db_id: str, user_id: int) -> None:
                     api_client.register_sample_database(
                         user_id=user_id,
                         runtime_id=runtime_db_id,
+                        sample_name=(
+                            "uber"
+                            if runtime_db_id.startswith("sample-uber-")
+                            else "netflix"
+                        ),
                     )
                     
                     # Try to permanently associate db_id with Netflix Titles database in the chat model

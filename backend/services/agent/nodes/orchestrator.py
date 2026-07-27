@@ -5,24 +5,39 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
-from backend.models.blocks import AgentResponse, ChartBlock, MarkdownBlock
+from backend.models.blocks import AgentResponse, ChartBlock, MarkdownBlock, UIBlock
 from backend.prompts.orchestrator import (
     ORCHESTRATOR_FORMATTER_PROMPT,
     ORCHESTRATOR_PLANNER_PROMPT,
     ORCHESTRATOR_REVIEW_PROMPT,
+    ORCHESTRATOR_SELECTION_PROMPT,
 )
 from backend.services.agent.agent_chat import LLMGenerationError
 from backend.services.agent.nodes.base import NodeBase, sanitize_tool_calls_in_messages
+from backend.services.agent.metadata import (
+    safe_template,
+    sanitize_generated_block,
+    state_candidates,
+    state_metadata,
+)
 from backend.services.agent.state import (
     AgentConfiguration,
     AgentState,
     ExecutionPlan,
     InvestigationDecision,
     PlanStep,
+    PresentationCandidate,
+    ResponseSelection,
 )
 
 MAX_REPLANS = 2
 VISUALIZATION_KEYWORDS = ("gráfica", "grafica", "chart", "graficar", "visualizar", "visualización", "visualizacion", "dashboard")
+STATISTICS_KEYWORDS = (
+    "anomal", "atípic", "outlier", "tendencia", "evolución", "crecimiento",
+    "caída", "caida", "promedio", "media", "mediana", "percentil", "desviación",
+    "distribución", "variabilidad", "nulo", "faltante", "calidad de datos",
+    "ranking", "participación", "participacion", "segmento", "compar", "kpi",
+)
 
 
 def _normalize_steps(
@@ -69,13 +84,100 @@ def _enforce_visualization_step(steps: list[PlanStep], messages: list[Any]) -> l
     return enriched
 
 
+def _requires_statistics(messages: list[Any]) -> bool:
+    user_text = _latest_user_text(messages)
+    return any(keyword in user_text for keyword in STATISTICS_KEYWORDS)
+
+
+def _enforce_statistics_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
+    """Ensure business-analysis requests receive verified statistical evidence.
+
+    The planner still supplies the objective, while this guard prevents a SQL-only
+    answer when the user's wording explicitly requests an analytical conclusion.
+    """
+    if not _requires_statistics(messages):
+        return steps
+
+    enriched = list(steps)
+    specialists = {step.specialist for step in enriched}
+    if "sql" not in specialists:
+        enriched.insert(0, PlanStep(specialist="sql", objective="Identificar y validar los datos necesarios para el análisis estadístico."))
+    if "statistics" not in specialists:
+        statistics_step = PlanStep(
+            specialist="statistics",
+            objective="Calcular las métricas y hallazgos estadísticos solicitados con evidencia verificable.",
+        )
+        visualization_index = next(
+            (index for index, step in enumerate(enriched) if step.specialist == "visualization"),
+            len(enriched),
+        )
+        enriched.insert(visualization_index, statistics_step)
+    return enriched
+
+
 def _evidence(state: AgentState) -> str:
     payload = {
-        "artifacts": [artifact.model_dump() for artifact in state.artifacts],
+        "artifacts": [artifact.model_dump(exclude={"debug_metadata"}) for artifact in state.artifacts],
         "contributions": [contribution.model_dump() for contribution in state.contributions],
         "completed_steps": [step.model_dump() for step in state.completed_steps],
+        "metadata": {key: value.model_dump() for key, value in state_metadata(state.artifacts).items()},
     }
     return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _candidate_evidence(
+    candidates: list[PresentationCandidate], metadata: dict[str, Any]
+) -> str:
+    """Expose only selection-relevant evidence to the final editor."""
+    payload = {
+        "facts": {key: value.model_dump() for key, value in metadata.items()},
+        "candidates": [
+            {
+                "id": candidate.id,
+                "tool_call_id": candidate.tool_call_id,
+                "block_type": candidate.block.type,
+                "label": getattr(candidate.block, "label", None),
+                "title": getattr(candidate.block, "title", None),
+                "fact_keys": candidate.fact_keys,
+            }
+            for candidate in candidates
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _references(text: str) -> set[str]:
+    import re
+
+    return set(re.findall(r"\{\{meta\.([A-Za-z0-9_.-]+)\}\}", text))
+
+
+def _selected_presentation(
+    candidates: list[PresentationCandidate], selection: ResponseSelection, metadata: dict[str, Any]
+) -> tuple[list[UIBlock], dict[str, Any]]:
+    """Validate editor choices and keep a useful verified fallback on bad IDs."""
+    by_id = {candidate.id: candidate for candidate in candidates}
+    selected: list[PresentationCandidate] = []
+    seen: set[str] = set()
+    for candidate_id in selection.candidate_ids:
+        candidate = by_id.get(candidate_id)
+        if candidate and candidate_id not in seen:
+            selected.append(candidate)
+            seen.add(candidate_id)
+
+    # An empty or invalid selection must not erase verified specialist output.
+    if not selected and candidates:
+        selected = candidates
+
+    selected_keys = {
+        key for candidate in selected for key in candidate.fact_keys if key in metadata
+    }
+    selected_keys.update(
+        key for key in _references(selection.summary + "\n" + selection.narrative) if key in metadata
+    )
+    return [candidate.block for candidate in selected], {
+        key: metadata[key] for key in selected_keys
+    }
 
 
 def _contribution_blocks(state: AgentState) -> list[dict[str, Any]]:
@@ -135,7 +237,9 @@ class OrchestratorNode(NodeBase):
                 plan = ExecutionPlan(
                     steps=[PlanStep(specialist="sql", objective="Descubrir los datos necesarios.")]
                 )
-            steps = _enforce_visualization_step(plan.steps, messages)
+            steps = _enforce_statistics_step(
+                _enforce_visualization_step(plan.steps, messages), messages
+            )
             return {
                 "planning_started": True,
                 "plan_round": 1,
@@ -174,6 +278,54 @@ class OrchestratorNode(NodeBase):
                         "pending_steps": next_steps,
                     }
 
+        metadata = state_metadata(state.artifacts)
+        candidates = state_candidates(state.artifacts)
+
+        if candidates:
+            selection_messages = [
+                SystemMessage(content=ORCHESTRATOR_SELECTION_PROMPT),
+                *messages,
+                HumanMessage(
+                    content="[CATALOGO_DE_EVIDENCIA]\n"
+                    + _candidate_evidence(candidates, metadata)
+                ),
+            ]
+            try:
+                selection = llm.with_structured_output(
+                    ResponseSelection, method="json_schema"
+                ).invoke(
+                    selection_messages,
+                    config={"configurable": config.get("configurable", {})},
+                )
+                selection = ResponseSelection.model_validate(selection)
+            except Exception:
+                selection = ResponseSelection(
+                    summary="Resultados verificados disponibles.", candidate_ids=[]
+                )
+
+            blocks, selected_metadata = _selected_presentation(
+                candidates, selection, metadata
+            )
+            summary = safe_template(selection.summary, selected_metadata)
+            narrative = safe_template(selection.narrative, selected_metadata)
+            final_blocks: list[UIBlock] = []
+            if narrative.strip():
+                final_blocks.append(MarkdownBlock(content=narrative))
+            elif not any(block.type == "markdown" for block in blocks):
+                final_blocks.append(MarkdownBlock(content=summary))
+            final_blocks.extend(blocks)
+            validated = AgentResponse.model_validate(
+                {
+                    "summary": summary,
+                    "blocks": final_blocks,
+                    "metadata": selected_metadata,
+                }
+            )
+            return {
+                "response": validated.model_dump(),
+                "messages": [AIMessage(content=validated.summary)],
+            }
+
         formatter_messages = [
             SystemMessage(content=ORCHESTRATOR_FORMATTER_PROMPT),
             *messages,
@@ -194,15 +346,19 @@ class OrchestratorNode(NodeBase):
                 raise LLMGenerationError("No se pudo preparar una respuesta para el usuario.") from exc
 
         response = AgentResponse.model_validate(response)
+        response.metadata = metadata
+        response.summary = safe_template(response.summary, metadata)
         blocks = _contribution_blocks(state)
         if blocks:
             if not any(block.get("type") == "markdown" for block in blocks):
                 blocks.insert(0, MarkdownBlock(content=response.summary).model_dump())
             response = AgentResponse.model_validate(
-                {"summary": response.summary, "blocks": blocks}
+                {"summary": response.summary, "blocks": blocks, "metadata": metadata}
             )
         elif not response.blocks:
             response.blocks = [MarkdownBlock(content=response.summary)]
+        else:
+            response.blocks = [sanitize_generated_block(block, metadata) for block in response.blocks]
         validated = AgentResponse.model_validate(response)
         return {
             "response": validated.model_dump(),

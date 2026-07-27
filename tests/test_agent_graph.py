@@ -6,6 +6,7 @@ from backend.services.agent.graph import create_agent_graph, route_after_orchest
 from backend.services.agent.nodes.orchestrator import OrchestratorNode
 from backend.services.agent.nodes.sql import SqlNode
 from backend.services.agent.nodes.statistics import StatisticsNode
+from backend.services.agent.nodes.statistics_grant import StatisticsGrantNode
 from backend.services.agent.nodes.visualization import VisualizationNode
 from backend.services.agent.state import AgentState, PlanStep
 
@@ -46,7 +47,7 @@ class TestPlanRouting:
         state = AgentState(
             pending_steps=[PlanStep(specialist="statistics", objective="Analizar datos")],
         )
-        assert route_after_orchestrator(state) == "statistics"
+        assert route_after_orchestrator(state) == "authorize_statistics"
 
     def test_routes_sql_statistics_then_visualization(self):
         state = AgentState(
@@ -100,6 +101,7 @@ class TestAgentGraph:
             OrchestratorNode(),
             SqlNode(),
             StatisticsNode(),
+            StatisticsGrantNode(),
             VisualizationNode(),
         )
         assert graph is not None
@@ -109,6 +111,7 @@ class TestAgentGraph:
             OrchestratorNode(),
             SqlNode(),
             StatisticsNode(),
+            StatisticsGrantNode(),
             VisualizationNode(),
         )
         node_names = set(graph.nodes.keys())
@@ -118,6 +121,7 @@ class TestAgentGraph:
             "orchestrator",
             "sql",
             "statistics",
+            "authorize_statistics",
             "visualization",
             "tools_sql",
             "tools_statistics",

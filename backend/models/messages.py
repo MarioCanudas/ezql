@@ -1,10 +1,11 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, Field as PydanticField, JsonValue
 from sqlmodel import JSON, Field, SQLModel
 
 from backend.models.blocks import FlexibleDataBlock
+from backend.models.metadata import MessageMetadata
 
 
 class Role(str, Enum):
@@ -15,6 +16,7 @@ class Content(BaseModel):
     text: str
     blocks: list[FlexibleDataBlock] | None = None
     data: list[FlexibleDataBlock] | None = None
+    metadata: MessageMetadata = PydanticField(default_factory=dict)
 
 class MessageBase(SQLModel):
     chat_id: int = Field(foreign_key="chats.id", index=True)

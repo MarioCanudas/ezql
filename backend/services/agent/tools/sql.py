@@ -2,6 +2,7 @@ from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
+from backend.models.blocks import MetricBlock
 from backend.services.agent.state import AgentConfiguration
 from backend.services.user_database import RuntimeDatabaseError
 from backend.services.sql_safety import UnsafeSQLError
@@ -56,7 +57,15 @@ def count_rows(table_name: str, config: RunnableConfig) -> dict:
         total = agent_config.database_service.count_rows(
             agent_config.runtime_db_id, user_id=agent_config.user_id, table_name=table_name
         )
-        return tool_success("Conteo disponible.", data={"total": total})
+        return tool_success(
+            "Conteo disponible.",
+            data={
+                "total": total,
+                "suggested_blocks": [
+                    MetricBlock(label="Total de registros", value=f"{total:,}").model_dump()
+                ],
+            },
+        )
     except Exception:
         return tool_failure("No fue posible contar los registros solicitados.")
 

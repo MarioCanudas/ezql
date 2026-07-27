@@ -63,8 +63,9 @@ def render(chat_id: int | None = None) -> None:
     runtime_db_ids = {db["id"] for db in runtime_databases}
     runtime_db_missing = False
 
-    # Check if the associated database is Netflix Titles
+    # Check if the associated database is a bundled sample
     is_netflix_db = False
+    is_sample_db = False
     netflix_db_id = None
     
     # Try to find the persistent Netflix database ID
@@ -88,7 +89,8 @@ def render(chat_id: int | None = None) -> None:
         # Check runtime db association
         runtime_db_id = active_chat.get("runtime_db_id")
         if runtime_db_id and (runtime_db_id.startswith("sample-") or runtime_db_id == "sample"):
-            is_netflix_db = True
+            is_sample_db = True
+            is_netflix_db = not runtime_db_id.startswith("sample-uber-")
 
         # Cheap fallback: Check in-memory chat title or summary
         if not is_netflix_db:
@@ -113,13 +115,17 @@ def render(chat_id: int | None = None) -> None:
         db_is_missing = not db_id_to_check or db_id_to_check not in runtime_db_ids
 
         if db_is_missing:
-            if is_netflix_db:
+            if is_sample_db:
                 # AUTOMATIC REACTIVATION
                 try:
                     target_runtime_id = db_id_to_check or f"sample-{active_chat['id']}"
+                    sample_name = (
+                        "uber" if target_runtime_id.startswith("sample-uber-") else "netflix"
+                    )
                     api_client.register_sample_database(
                         user_id=user["id"],
                         runtime_id=target_runtime_id,
+                        sample_name=sample_name,
                     )
                     
                     # Update chat in the backend database to link it persistent and runtime-wise
@@ -135,7 +141,7 @@ def render(chat_id: int | None = None) -> None:
                     api_client.list_runtime_databases.clear()
                     st.rerun()
                 except api_client.ApiError as exc:
-                    st.error(f"Error cargando base de prueba de Netflix: {exc}")
+                    st.error(f"Error cargando base de prueba: {exc}")
             else:
                 # Custom uploaded database is missing
                 if db_id_to_check:

@@ -45,3 +45,31 @@ def test_renderer_keeps_historical_specialized_blocks(mock_st):
 
     assert mock_st.info.call_count == 2
     mock_st.caption.assert_called_once_with("Cambio: 12%")
+
+
+@patch.object(ui, "st")
+def test_renderer_resolves_metadata_without_mutating_the_block(mock_st):
+    metric_column = MagicMock()
+    mock_st.columns.return_value = [metric_column]
+    payload = {
+        "metadata": {"sales.total": {"value": 8808, "display": "8,808", "artifact_id": "call-1", "path": "data.total"}},
+        "blocks": [
+            {"type": "markdown", "content": "Total: {{meta.sales.total}}"},
+            {"type": "metric", "label": "Total", "value": "{{meta.sales.total}}"},
+        ],
+    }
+
+    ui.render_agent_response(payload)
+
+    mock_st.markdown.assert_called_once_with("Total: 8,808")
+    metric_column.metric.assert_called_once_with(label="Total", value="8,808", delta=None)
+    assert payload["blocks"][1]["value"] == "{{meta.sales.total}}"
+
+
+@patch.object(ui, "st")
+def test_renderer_marks_missing_metadata_as_unavailable(mock_st):
+    ui.render_agent_response(
+        {"blocks": [{"type": "markdown", "content": "Total: {{meta.missing}}"}], "metadata": {}}
+    )
+
+    mock_st.markdown.assert_called_once_with("Total: Dato no disponible")

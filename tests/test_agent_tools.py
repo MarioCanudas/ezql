@@ -1,5 +1,5 @@
 from backend.services.agent.agent_chat import AgentChat
-from backend.services.agent.tools.statistics import analyze_trend, detect_outliers
+from backend.services.agent.tools.statistics import describe_metric, detect_outliers
 from backend.services.agent.tools.visualization import create_bar_chart, create_line_chart
 from backend.services.user_database import UserDatabase
 
@@ -15,21 +15,22 @@ def _tool_config(database: UserDatabase, runtime_db_id: str) -> dict:
     }
 
 
-def test_trend_tool_returns_evidence_without_ui_blocks():
+def test_describe_metric_tool_returns_evidence_with_validated_suggested_blocks():
     database = UserDatabase()
     try:
         runtime = database.register_sample_sqlite(user_id=1)
-        result = analyze_trend.invoke(
+        result = describe_metric.invoke(
             {
-                "table_name": "netflix_titles",
-                "date_column": "release_year",
-                "metric_column": "release_year",
+                "scope": {
+                    "table_name": "netflix_titles",
+                    "metric_column": "release_year",
+                },
             },
             config=_tool_config(database, runtime.id),
         )
         assert result["ok"] is True
-        assert result["data"]["direction"] in {"up", "down", "stable"}
-        assert "blocks" not in result
+        assert result["data"]["statistics"]["mean"] > 0
+        assert result["data"]["suggested_blocks"]
     finally:
         database.close()
 
@@ -40,9 +41,12 @@ def test_statistics_tools_return_safe_failure_for_invalid_columns():
         runtime = database.register_sample_sqlite(user_id=1)
         result = detect_outliers.invoke(
             {
-                "table_name": "netflix_titles",
-                "category_column": "missing_column",
-                "metric_column": "release_year",
+                "scope": {
+                    "table_name": "netflix_titles",
+                    "dimension_column": "missing_column",
+                    "metric_column": "release_year",
+                    "aggregation": "mean",
+                },
             },
             config=_tool_config(database, runtime.id),
         )

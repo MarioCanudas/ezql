@@ -12,7 +12,11 @@ from .sql import (
 
 from .statistics import (
     analyze_trend,
+    compare_segments,
+    describe_metric,
     detect_outliers,
+    profile_data,
+    run_statistics_python,
 )
 
 from .visualization import (
@@ -34,8 +38,12 @@ sql_tools = [
 ]
 
 statistics_tools = [
+    profile_data,
+    describe_metric,
+    compare_segments,
     analyze_trend,
     detect_outliers,
+    run_statistics_python,
 ]
 
 visualization_tools = [

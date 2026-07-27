@@ -1,6 +1,6 @@
-# Base de datos de prueba (SQLite)
+# Bases de datos de prueba (SQLite)
 
-Este proyecto incluye el dataset de ejemplo (`netflix_titles.csv`), pero por seguridad el archivo SQLite (`netflix.db`) **no se versiona / no se sube al repositorio** (los `*.db` están ignorados en `.gitignore`).
+Este proyecto incluye datasets de ejemplo para Netflix y Uber. Los archivos SQLite (`*.db`) **no se versionan / no se suben al repositorio** porque están ignorados en `.gitignore`.
 
 Para usar la opción **“Usar base de prueba Netflix”** debes generar `frontend/test_data/netflix.db` en tu máquina.
 
@@ -11,9 +11,24 @@ Para que la app encuentre la base de prueba **debes mantener exactamente**:
 - **Nombre del archivo:** `netflix.db`
 - **Ubicación:** `frontend/test_data/netflix.db`
 
-La aplicación carga esta base automáticamente cuando eliges **“Usar base de prueba Netflix”** en la pantalla de **Nuevo chat**.
+La aplicación carga esta base automáticamente cuando eliges una de las opciones de muestra en la pantalla de **Nuevo chat**.
 
 ---
+
+## Uber Ride Analytics
+
+El archivo `ncr_ride_bookings.csv` contiene 150,000 registros de viajes de 2024. La base se genera como `uber_ride_bookings.db` y contiene la tabla `uber_ride_bookings` con tipos numéricos para importes, distancias, tiempos y calificaciones. Los valores `null` del CSV se convierten en `NULL` de SQLite.
+
+Para generar o regenerar la base:
+
+```bash
+cd frontend/test_data
+sqlite3 uber_ride_bookings.db < build_uber_ride_bookings.sql
+```
+
+El script importa el CSV en una tabla temporal, crea la tabla tipada y agrega índices para las consultas más habituales.
+
+La tabla conserva las 150,000 filas originales. `booking_id` no es único en el archivo fuente, por lo que `row_id` es la clave primaria interna.
 
 ## ▶️ ¿Qué pasa si no existe?
 
