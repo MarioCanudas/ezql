@@ -23,6 +23,17 @@ The project strictly separates the **Brain** (Backend) from the **Face** (Fronte
 *   **Backend (FastAPI):** Owns logic, database connections, AI orchestration, and statistical computations. It returns a structured `AgentResponse` containing a summary, ordered `UIBlock` items, and metadata for verified facts.
 *   **Frontend (Streamlit MVP):** Thin client responsible *only* for rendering the structured `AgentResponse` using `render_agent_response` in `frontend/components/ui.py`.
 
+### 4. Use-Case-Driven Testing
+Every new feature, behavior, or procedural change MUST include tests that represent
+the real way the backend and its users exercise that behavior. Isolated unit tests
+are useful but insufficient when the change crosses the agent, tools, persistence,
+API, or frontend boundaries. Tests should validate the complete contract and the
+important failure modes of the use case, including realistic provider responses,
+fallbacks, retries, validation, and persisted output where applicable. The number
+of tests is not constrained: add as many as necessary to give meaningful coverage;
+passing a large number of narrow tests does not compensate for missing end-to-end
+or integration coverage.
+
 ---
 
 ## Tech Stack & Implementation Details
@@ -124,6 +135,7 @@ ezql/
 7.  **Metadata as evidence:** `AgentResponse.metadata` contains only selected, presentable facts. Each fact has its original value, safe display string, tool-call ID and evidence path. Internal debug flattening must not be exposed to prompts or persisted response payloads.
 8.  **Safe references:** `{{meta.clave}}` references resolve in the frontend without mutating stored messages. Invalid references become `Dato no disponible` individually; free narrative, including literal numbers, must not trigger a global fallback.
 9.  **Verified candidates:** Metrics, tables and charts in a candidate-aware response must come from validated tool candidates. The orchestrator selects candidate IDs; it does not accept arbitrary numeric data from the formatter.
+10. **Use-case tests are mandatory:** Whenever implementing a new capability or changing an existing procedure, add tests at the highest relevant boundary, preferably exercising the real service/graph/tools and API flow with realistic inputs and provider outputs. Do not rely only on isolated mocks or happy-path unit tests. Include the necessary error, fallback, retry, persistence, and rendering scenarios, regardless of how many tests that requires.
 
 ---
 
@@ -188,6 +200,15 @@ references remains valid. Historical messages without metadata continue to
 render normally.
 
 ### Testing expectations
+
+Tests are part of the implementation, not a final checklist. A change is incomplete
+until its real use cases are represented in the test suite. Prefer integration and
+contract tests that cross the changed boundaries (for example, provider response →
+LangGraph → database tool → `AgentResponse` → API persistence) while retaining unit
+tests for deterministic edge cases. Mocks must preserve realistic response shapes
+and failure behavior; they must not hide validation errors, unsupported provider
+features, swallowed exceptions, or incorrect persistence. Add as many tests as the
+behavior requires, with no arbitrary test-count limit.
 
 Run `uv run pytest` after agent, metadata, statistics, sandbox or renderer
 changes. Cover exact descriptive metrics, typed filters, missing periods and
