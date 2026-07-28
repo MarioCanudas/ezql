@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import json
+import logging
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -13,24 +17,27 @@ from backend.prompts.orchestrator import (
     ORCHESTRATOR_SELECTION_PROMPT,
 )
 from backend.services.agent.agent_chat import LLMGenerationError
-from backend.services.agent.nodes.base import NodeBase, sanitize_tool_calls_in_messages
 from backend.services.agent.metadata import (
     safe_template,
     sanitize_generated_block,
     state_candidates,
     state_metadata,
 )
+from backend.services.agent.nodes.base import NodeBase, sanitize_tool_calls_in_messages
 from backend.services.agent.state import (
     AgentConfiguration,
     AgentState,
+    AgentTask,
     ExecutionPlan,
     InvestigationDecision,
     PlanStep,
     PresentationCandidate,
     ResponseSelection,
+    TaskResult,
 )
 
 MAX_REPLANS = 2
+logger = logging.getLogger(__name__)
 VISUALIZATION_KEYWORDS = ("gráfica", "grafica", "chart", "graficar", "visualizar", "visualización", "visualizacion", "dashboard")
 STATISTICS_KEYWORDS = (
     "anomal", "atípic", "outlier", "tendencia", "evolución", "crecimiento",
@@ -40,86 +47,177 @@ STATISTICS_KEYWORDS = (
 )
 
 
-def _normalize_steps(
-    steps: list[PlanStep], *, round_number: int, completed: list[PlanStep]
-) -> list[PlanStep]:
-    completed_objectives = {
-        (step.specialist, step.objective.strip().casefold()) for step in completed
+def _messages(state: AgentState, config: RunnableConfig) -> list[Any]:
+    try:
+        configured = config.get("configurable", {})
+        input_messages = configured.get("input_messages", [])
+        if input_messages:
+            return sanitize_tool_calls_in_messages(list(input_messages))
+    except Exception:
+        pass
+    return sanitize_tool_calls_in_messages(list(getattr(state, "messages", [])))
+
+
+def _normalize_tasks(
+    tasks: list[AgentTask], *, round_number: int, completed: list[AgentTask]
+) -> list[AgentTask]:
+    completed_keys = {
+        (task.specialist, task.objective.strip().casefold()) for task in completed
     }
-    normalized: list[PlanStep] = []
-    for index, step in enumerate(steps, start=1):
-        objective = step.objective.strip()
-        key = (step.specialist, objective.casefold())
-        if not objective or key in completed_objectives:
+    normalized: list[AgentTask] = []
+    for index, raw_task in enumerate(tasks, start=1):
+        task = raw_task if isinstance(raw_task, AgentTask) else AgentTask.model_validate(raw_task)
+        objective = task.objective.strip()
+        key = (task.specialist, objective.casefold())
+        if not objective or key in completed_keys:
             continue
+        policy = task.policy.model_copy()
+        if task.specialist == "statistics" and task.requires_grant is False:
+            task = task.model_copy(update={"requires_grant": True})
         normalized.append(
-            PlanStep(
-                id=f"round-{round_number}-{index}-{step.specialist}",
-                specialist=step.specialist,
-                objective=objective,
+            task.model_copy(
+                update={
+                    "id": task.id or f"round-{round_number}-{index}-{task.specialist}",
+                    "objective": objective,
+                    "policy": policy,
+                    "status": "pending",
+                }
             )
         )
-        completed_objectives.add(key)
+        completed_keys.add(key)
     return normalized
 
 
-def _latest_user_text(messages: list[Any]) -> str:
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            return str(message.content).casefold()
-    return ""
+def validate_task_plan(tasks: list[AgentTask]) -> list[AgentTask]:
+    """Apply deterministic graph and resource constraints to an LLM plan."""
 
+    unique: dict[str, AgentTask] = {}
+    for task in tasks[:8]:
+        if task.id and task.id not in unique:
+            policy = task.policy.model_copy()
+            if policy.resource == "statistics_sandbox":
+                policy = policy.model_copy(update={"max_concurrency": 1})
+            else:
+                policy = policy.model_copy(update={
+                    "max_concurrency": min(policy.max_concurrency, 2),
+                })
+            if not policy.parallelizable:
+                policy = policy.model_copy(update={"max_concurrency": 1})
+            unique[task.id] = task.model_copy(update={
+                "policy": policy,
+                "requires_grant": task.requires_grant or task.specialist == "statistics",
+            })
 
-def _enforce_visualization_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
-    """Guarantee a visual request reaches the visualization specialist."""
-    if not any(keyword in _latest_user_text(messages) for keyword in VISUALIZATION_KEYWORDS):
-        return steps
-
-    specialists = {step.specialist for step in steps}
-    enriched = list(steps)
-    if "sql" not in specialists:
-        enriched.insert(0, PlanStep(specialist="sql", objective="Preparar y validar los datos para la visualización solicitada."))
-    if "visualization" not in specialists:
-        enriched.append(PlanStep(specialist="visualization", objective="Crear la gráfica solicitada con los datos validados."))
-    return enriched
-
-
-def _requires_statistics(messages: list[Any]) -> bool:
-    user_text = _latest_user_text(messages)
-    return any(keyword in user_text for keyword in STATISTICS_KEYWORDS)
-
-
-def _enforce_statistics_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
-    """Ensure business-analysis requests receive verified statistical evidence.
-
-    The planner still supplies the objective, while this guard prevents a SQL-only
-    answer when the user's wording explicitly requests an analytical conclusion.
-    """
-    if not _requires_statistics(messages):
-        return steps
-
-    enriched = list(steps)
-    specialists = {step.specialist for step in enriched}
-    if "sql" not in specialists:
-        enriched.insert(0, PlanStep(specialist="sql", objective="Identificar y validar los datos necesarios para el análisis estadístico."))
-    if "statistics" not in specialists:
-        statistics_step = PlanStep(
-            specialist="statistics",
-            objective="Calcular las métricas y hallazgos estadísticos solicitados con evidencia verificable.",
+    # A visualization is a presentation consumer, never an evidence producer.
+    # Repair a plan that tries to render before any SQL/statistics/quality task
+    # has produced a verified artifact.
+    evidence_tasks = [
+        task for task in unique.values()
+        if task.specialist in {"sql", "statistics", "quality"}
+    ]
+    for task in list(unique.values()):
+        if task.specialist != "visualization":
+            continue
+        evidence_dependency = next(
+            (dependency for dependency in task.depends_on
+             if unique.get(dependency) in evidence_tasks),
+            None,
         )
-        visualization_index = next(
-            (index for index, step in enumerate(enriched) if step.specialist == "visualization"),
-            len(enriched),
+        if evidence_dependency is None:
+            if not evidence_tasks:
+                evidence_id = f"{task.id}-evidence"
+                while evidence_id in unique:
+                    evidence_id += "-sql"
+                evidence_task = AgentTask(
+                    id=evidence_id,
+                    specialist="sql",
+                    objective="Obtener evidencia de solo lectura para respaldar la visualización.",
+                )
+                unique[evidence_id] = evidence_task
+                evidence_tasks.append(evidence_task)
+            evidence_dependency = evidence_tasks[0].id
+            unique[task.id] = task.model_copy(
+                update={"depends_on": [*task.depends_on, evidence_dependency]}
+            )
+
+    valid_ids = set(unique)
+    sanitized: list[AgentTask] = []
+    for task in unique.values():
+        dependencies = [
+            dependency
+            for dependency in task.depends_on
+            if dependency in valid_ids and dependency != task.id
+        ]
+        sanitized.append(task.model_copy(update={"depends_on": dependencies}))
+
+    by_id = {task.id: task for task in sanitized}
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    cyclic: set[str] = set()
+
+    def visit(task_id: str) -> None:
+        if task_id in visiting:
+            cyclic.add(task_id)
+            return
+        if task_id in visited:
+            return
+        visiting.add(task_id)
+        for dependency in by_id[task_id].depends_on:
+            if dependency in by_id:
+                visit(dependency)
+                if dependency in cyclic:
+                    cyclic.add(task_id)
+        visiting.remove(task_id)
+        visited.add(task_id)
+
+    for task_id in by_id:
+        visit(task_id)
+    return [task for task in sanitized if task.id not in cyclic]
+
+
+def _legacy_pending_tasks(state: AgentState) -> list[AgentTask]:
+    return [
+        AgentTask(
+            id=step.id or f"legacy-{index}-{step.specialist}",
+            specialist=step.specialist,
+            objective=step.objective,
+            requires_grant=step.specialist == "statistics",
         )
-        enriched.insert(visualization_index, statistics_step)
-    return enriched
+        for index, step in enumerate(getattr(state, "pending_steps", []), start=1)
+    ]
+
+
+def _apply_task_results(state: AgentState) -> list[AgentTask]:
+    tasks = [task.model_copy() for task in state.tasks]
+    by_id = {task.id: task for task in tasks}
+    latest: dict[str, TaskResult] = {}
+    for raw_result in state.task_results:
+        result = raw_result if isinstance(raw_result, TaskResult) else TaskResult.model_validate(raw_result)
+        latest[result.task_id] = result
+    for task_id, result in latest.items():
+        task = by_id.get(task_id)
+        if task is None:
+            continue
+        if result.status == "completed":
+            by_id[task_id] = task.model_copy(update={"status": "completed"})
+        else:
+            next_attempts = task.attempts + 1
+            if next_attempts < task.max_attempts:
+                by_id[task_id] = task.model_copy(
+                    update={"status": "ready", "attempts": next_attempts}
+                )
+            else:
+                by_id[task_id] = task.model_copy(
+                    update={"status": "failed", "attempts": next_attempts}
+                )
+    return [by_id[task.id] for task in tasks]
 
 
 def _evidence(state: AgentState) -> str:
     payload = {
-        "artifacts": [artifact.model_dump(exclude={"debug_metadata"}) for artifact in state.artifacts],
+        "artifacts": [artifact.model_dump(exclude={"debug_metadata", "data"}) for artifact in state.artifacts],
         "contributions": [contribution.model_dump() for contribution in state.contributions],
-        "completed_steps": [step.model_dump() for step in state.completed_steps],
+        "tasks": [task.model_dump() for task in state.tasks],
         "metadata": {key: value.model_dump() for key, value in state_metadata(state.artifacts).items()},
     }
     return json.dumps(payload, ensure_ascii=False, default=str)
@@ -128,7 +226,6 @@ def _evidence(state: AgentState) -> str:
 def _candidate_evidence(
     candidates: list[PresentationCandidate], metadata: dict[str, Any]
 ) -> str:
-    """Expose only selection-relevant evidence to the final editor."""
     payload = {
         "facts": {key: value.model_dump() for key, value in metadata.items()},
         "candidates": [
@@ -146,16 +243,60 @@ def _candidate_evidence(
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def _references(text: str) -> set[str]:
-    import re
+def _invoke_structured(
+    llm: Any,
+    schema: Any,
+    messages: list[Any],
+    config: dict[str, Any],
+    label: str,
+) -> Any:
+    """Invoke structured output with a provider-compatible fallback."""
 
+    try:
+        return llm.with_structured_output(schema, method="json_schema").invoke(
+            messages, config=config
+        )
+    except Exception as exc:
+        logger.warning(
+            "Structured %s output with json_schema failed; retrying json_mode (%s)",
+            label,
+            type(exc).__name__,
+        )
+        return llm.with_structured_output(schema, method="json_mode").invoke(
+            messages, config=config
+        )
+
+
+def _fallback_selection(
+    state: AgentState, candidates: list[PresentationCandidate]
+) -> ResponseSelection:
+    narrative = next(
+        (
+            contribution.summary.strip()
+            for contribution in reversed(state.contributions)
+            if contribution.summary.strip()
+        ),
+        "",
+    )
+    if not narrative:
+        narrative = next(
+            (artifact.summary.strip() for artifact in reversed(state.artifacts) if artifact.summary.strip()),
+            "",
+        )
+    return ResponseSelection(
+        summary="Encontré resultados verificados para tu consulta.",
+        narrative=narrative,
+        candidate_ids=[candidate.id for candidate in candidates],
+    )
+
+
+def _references(text: str) -> set[str]:
     return set(re.findall(r"\{\{meta\.([A-Za-z0-9_.-]+)\}\}", text))
 
 
 def _selected_presentation(
     candidates: list[PresentationCandidate], selection: ResponseSelection, metadata: dict[str, Any]
 ) -> tuple[list[UIBlock], dict[str, Any]]:
-    """Validate editor choices and keep a useful verified fallback on bad IDs."""
     by_id = {candidate.id: candidate for candidate in candidates}
     selected: list[PresentationCandidate] = []
     seen: set[str] = set()
@@ -164,11 +305,8 @@ def _selected_presentation(
         if candidate and candidate_id not in seen:
             selected.append(candidate)
             seen.add(candidate_id)
-
-    # An empty or invalid selection must not erase verified specialist output.
     if not selected and candidates:
         selected = candidates
-
     selected_keys = {
         key for candidate in selected for key in candidate.fact_keys if key in metadata
     }
@@ -193,26 +331,20 @@ def _contribution_blocks(state: AgentState) -> list[dict[str, Any]]:
     for contribution in state.contributions:
         for block in contribution.blocks:
             append_once(block.model_dump())
-
-    # Una visualización que la herramienta ya validó no puede perderse porque
-    # el modelo olvidó proponerla al construir su contribución. Los artefactos
-    # son la fuente de verdad para los datos que Streamlit puede renderizar.
     for artifact in state.artifacts:
-        if not artifact.ok or not isinstance(artifact.data, dict):
-            continue
-        chart = artifact.data.get("chart")
-        if not isinstance(chart, dict):
-            continue
-        try:
-            append_once(ChartBlock.model_validate(chart).model_dump())
-        except ValidationError:
-            # Un artefacto inválido no debe romper la respuesta completa.
-            continue
+        for candidate in artifact.presentation_candidates:
+            append_once(candidate.block.model_dump())
+        # Compatibility fallback for old in-memory artifacts created by tests.
+        if isinstance(artifact.data, dict) and isinstance(artifact.data.get("chart"), dict):
+            try:
+                append_once(ChartBlock.model_validate(artifact.data["chart"]).model_dump())
+            except ValidationError:
+                pass
     return blocks
 
 
 class OrchestratorNode(NodeBase):
-    """Plans, reviews evidence, and assembles a single composable response."""
+    """Plans a DAG, reviews evidence, and composes one safe response."""
 
     def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         try:
@@ -224,88 +356,115 @@ class OrchestratorNode(NodeBase):
             agent_config.runtime_db_id, user_id=agent_config.user_id
         )
         llm = agent_config.llm_service._build_client()
-        messages = sanitize_tool_calls_in_messages(list(state.messages))
+        messages = _messages(state, config)
+        current_tasks = state.tasks or _legacy_pending_tasks(state)
 
         if not state.planning_started:
             try:
-                plan = llm.with_structured_output(ExecutionPlan, method="json_schema").invoke(
+                plan = _invoke_structured(
+                    llm,
+                    ExecutionPlan,
                     [SystemMessage(content=ORCHESTRATOR_PLANNER_PROMPT)] + messages,
-                    config={"configurable": config.get("configurable", {})},
+                    {"configurable": config.get("configurable", {})},
+                    "planner",
                 )
                 plan = ExecutionPlan.model_validate(plan)
-            except Exception:
+            except Exception as exc:
+                logger.exception("Planner failed; using the safe SQL fallback: %s", exc)
                 plan = ExecutionPlan(
-                    steps=[PlanStep(specialist="sql", objective="Descubrir los datos necesarios.")]
+                    tasks=[AgentTask(
+                        id="round-1-1-sql",
+                        specialist="sql",
+                        objective="Descubrir los datos necesarios.",
+                    )]
                 )
-            steps = _enforce_statistics_step(
-                _enforce_visualization_step(plan.steps, messages), messages
-            )
+            tasks = validate_task_plan(_normalize_tasks(plan.tasks, round_number=1, completed=[]))
+            if not tasks:
+                tasks = [
+                    AgentTask(
+                        id="round-1-1-sql",
+                        specialist="sql",
+                        objective="Descubrir los datos necesarios.",
+                    )
+                ]
             return {
                 "planning_started": True,
                 "plan_round": 1,
-                "pending_steps": _normalize_steps(steps, round_number=1, completed=[]),
+                "tasks": tasks,
+                "pending_steps": [PlanStep(**task.model_dump()) for task in tasks],
             }
 
-        if state.pending_steps:
-            return {}
+        if current_tasks and not state.tasks:
+            current_tasks = _apply_task_results(state.model_copy(update={"tasks": current_tasks}))
+        elif state.tasks and state.task_results:
+            current_tasks = _apply_task_results(state)
 
-        if state.replan_count < MAX_REPLANS:
+        if current_tasks and any(task.status in {"pending", "ready"} for task in current_tasks):
+            return {"tasks": current_tasks}
+
+        reviewable = bool(current_tasks) or (not state.tasks and not state.task_results)
+        if state.replan_count < MAX_REPLANS and reviewable:
             review_messages = [
                 SystemMessage(content=ORCHESTRATOR_REVIEW_PROMPT),
                 *messages,
                 HumanMessage(content="[EVIDENCIA_ACUMULADA]\n" + _evidence(state)),
             ]
             try:
-                decision = llm.with_structured_output(
-                    InvestigationDecision, method="json_schema"
-                ).invoke(
+                decision = _invoke_structured(
+                    llm,
+                    InvestigationDecision,
                     review_messages,
-                    config={"configurable": config.get("configurable", {})},
+                    {"configurable": config.get("configurable", {})},
+                    "review",
                 )
                 decision = InvestigationDecision.model_validate(decision)
-            except Exception:
-                decision = InvestigationDecision(action="finalize", reason="No se requiere más investigación.")
-
+            except Exception as exc:
+                logger.exception("Evidence review failed; finalizing safe evidence: %s", exc)
+                decision = InvestigationDecision(action="finalize", reason="La evidencia es suficiente.")
             if decision.action == "continue":
                 next_round = state.plan_round + 1
-                next_steps = _normalize_steps(
-                    decision.steps, round_number=next_round, completed=state.completed_steps
-                )
-                if next_steps:
+                next_tasks = validate_task_plan(_normalize_tasks(
+                    decision.tasks,
+                    round_number=next_round,
+                    completed=current_tasks,
+                ))
+                if next_tasks:
                     return {
                         "replan_count": state.replan_count + 1,
                         "plan_round": next_round,
-                        "pending_steps": next_steps,
+                        "tasks": next_tasks,
+                        "pending_steps": [PlanStep(**task.model_dump()) for task in next_tasks],
                     }
 
         metadata = state_metadata(state.artifacts)
         candidates = state_candidates(state.artifacts)
-
         if candidates:
             selection_messages = [
                 SystemMessage(content=ORCHESTRATOR_SELECTION_PROMPT),
                 *messages,
                 HumanMessage(
-                    content="[CATALOGO_DE_EVIDENCIA]\n"
-                    + _candidate_evidence(candidates, metadata)
+                    content="[CATALOGO_DE_EVIDENCIA]\n" + _candidate_evidence(candidates, metadata)
                 ),
             ]
+            selection_failed = False
             try:
-                selection = llm.with_structured_output(
-                    ResponseSelection, method="json_schema"
-                ).invoke(
+                selection = _invoke_structured(
+                    llm,
+                    ResponseSelection,
                     selection_messages,
-                    config={"configurable": config.get("configurable", {})},
+                    {"configurable": config.get("configurable", {})},
+                    "selection",
                 )
                 selection = ResponseSelection.model_validate(selection)
-            except Exception:
-                selection = ResponseSelection(
-                    summary="Resultados verificados disponibles.", candidate_ids=[]
-                )
-
-            blocks, selected_metadata = _selected_presentation(
-                candidates, selection, metadata
-            )
+            except Exception as exc:
+                selection_failed = True
+                logger.exception("Evidence selection failed; using verified fallback: %s", exc)
+                selection = _fallback_selection(state, candidates)
+            if not selection.summary.strip() or selection.summary.strip() == "Resultados verificados disponibles.":
+                selection.summary = _fallback_selection(state, candidates).summary
+            if selection_failed and not selection.narrative.strip():
+                selection.narrative = _fallback_selection(state, candidates).narrative
+            blocks, selected_metadata = _selected_presentation(candidates, selection, metadata)
             summary = safe_template(selection.summary, selected_metadata)
             narrative = safe_template(selection.narrative, selected_metadata)
             final_blocks: list[UIBlock] = []
@@ -315,16 +474,9 @@ class OrchestratorNode(NodeBase):
                 final_blocks.append(MarkdownBlock(content=summary))
             final_blocks.extend(blocks)
             validated = AgentResponse.model_validate(
-                {
-                    "summary": summary,
-                    "blocks": final_blocks,
-                    "metadata": selected_metadata,
-                }
+                {"summary": summary, "blocks": final_blocks, "metadata": selected_metadata}
             )
-            return {
-                "response": validated.model_dump(),
-                "messages": [AIMessage(content=validated.summary)],
-            }
+            return {"response": validated.model_dump(), "messages": [AIMessage(content=summary)]}
 
         formatter_messages = [
             SystemMessage(content=ORCHESTRATOR_FORMATTER_PROMPT),
@@ -360,7 +512,44 @@ class OrchestratorNode(NodeBase):
         else:
             response.blocks = [sanitize_generated_block(block, metadata) for block in response.blocks]
         validated = AgentResponse.model_validate(response)
-        return {
-            "response": validated.model_dump(),
-            "messages": [AIMessage(content=validated.summary)],
-        }
+        return {"response": validated.model_dump(), "messages": [AIMessage(content=validated.summary)]}
+
+
+# Deprecated helpers kept for callers that imported the previous keyword guards.
+# They are no longer used by the planner or graph routing.
+def _enforce_visualization_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
+    text = ""
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            text = str(message.content).casefold()
+            break
+    if not any(keyword in text for keyword in VISUALIZATION_KEYWORDS):
+        return steps
+    enriched = list(steps)
+    specialists = {step.specialist for step in enriched}
+    if "sql" not in specialists:
+        enriched.insert(0, PlanStep(specialist="sql", objective="Preparar y validar los datos para la visualización solicitada."))
+    if "visualization" not in specialists:
+        enriched.append(PlanStep(specialist="visualization", objective="Crear la gráfica solicitada con los datos validados."))
+    return enriched
+
+
+def _enforce_statistics_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
+    text = ""
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            text = str(message.content).casefold()
+            break
+    if not any(keyword in text for keyword in STATISTICS_KEYWORDS):
+        return steps
+    enriched = list(steps)
+    specialists = {step.specialist for step in enriched}
+    if "sql" not in specialists:
+        enriched.insert(0, PlanStep(specialist="sql", objective="Identificar y validar los datos necesarios para el análisis estadístico."))
+    if "statistics" not in specialists:
+        index = next(
+            (index for index, step in enumerate(enriched) if step.specialist == "visualization"),
+            len(enriched),
+        )
+        enriched.insert(index, PlanStep(specialist="statistics", objective="Calcular las métricas y hallazgos estadísticos solicitados con evidencia verificable."))
+    return enriched
