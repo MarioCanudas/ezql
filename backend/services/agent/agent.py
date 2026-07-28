@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 from backend.models import AgentReply, Messages, AgentResponse, MarkdownBlock
 from backend.services.agent.agent_chat import (
@@ -17,7 +19,10 @@ from backend.services.agent.nodes.sql import SqlNode
 from backend.services.agent.nodes.statistics import StatisticsNode
 from backend.services.agent.nodes.visualization import VisualizationNode
 from backend.services.agent.nodes.statistics_grant import StatisticsGrantNode
+from backend.services.agent.nodes.quality import QualityNode
 from backend.services.agent.statistics_grants import StatisticsGrantStore
+from backend.services.agent.checkpoint import AgentCheckpointStore, get_checkpoint_store
+from backend.services.agent.runtime import ExecutionArtifactStore
 
 
 class AnalystAgent:
@@ -30,6 +35,7 @@ class AnalystAgent:
         api_key: str,
         temperature: float = 0.0,
         reasoning_effort: str | None = None,
+        checkpoint_store: AgentCheckpointStore | None = None,
     ) -> None:
         if not api_key or not api_key.strip():
             raise LLMConfigurationError("The API key is required and cannot be empty.")
@@ -48,7 +54,9 @@ class AnalystAgent:
         self.statistics_node = StatisticsNode()
         self.statistics_grant_node = StatisticsGrantNode()
         self.visualization_node = VisualizationNode()
+        self.quality_node = QualityNode()
         self.statistics_grants = StatisticsGrantStore()
+        self.checkpoint_store = checkpoint_store or get_checkpoint_store()
 
         self.graph = create_agent_graph(
             self.orchestrator_node,
@@ -56,6 +64,8 @@ class AnalystAgent:
             self.statistics_node,
             self.statistics_grant_node,
             self.visualization_node,
+            self.quality_node,
+            checkpointer=self.checkpoint_store.saver,
         )
 
     def generate_reply(
@@ -66,6 +76,7 @@ class AnalystAgent:
         summary: str | None,
         runtime_db_id: str,
         user_id: int,
+        thread_id: str | None = None,
         recursion_limit: int = 150,
     ) -> AgentReply:
         message = user_message.strip()
@@ -85,25 +96,38 @@ class AnalystAgent:
         ):
             chat_messages.append(HumanMessage(content=message))
 
-        initial_state = AgentState(messages=chat_messages)
+        initial_state = AgentState()
+        artifact_store = ExecutionArtifactStore()
 
-        config_dict = {
+        config_dict: dict[str, Any] = {
             "database_service": self.database_service,
             "llm_service": self.llm_service,
             "runtime_db_id": runtime_db_id,
             "user_id": user_id,
             "statistics_grants": self.statistics_grants,
+            "artifact_store": artifact_store,
+            "input_messages": chat_messages,
+            "thread_id": thread_id,
+        }
+        graph_config: RunnableConfig = {
+            "configurable": {
+                **config_dict,
+                "thread_id": thread_id or f"ephemeral-{user_id}-{id(initial_state)}",
+            },
+            "recursion_limit": recursion_limit,
         }
 
         try:
-            response = self.graph.invoke(
-                initial_state,
-                config={
-                    "configurable": config_dict,
-                    "recursion_limit": recursion_limit,
-                },
-            )
-            text_response = str(response["messages"][-1].content)
+            try:
+                response = self.graph.invoke(initial_state, config=graph_config)
+            except Exception:
+                # LangGraph persists the last successful super-step. Reusing the
+                # same thread lets us retry only the failed branch.
+                if not thread_id:
+                    raise
+                graph_config["configurable"]["retry_attempt"] = 2
+                response = self.graph.invoke(None, config=graph_config)
+            text_response = str(response.get("response", {}).get("summary", ""))
         except (LLMGenerationError, RuntimeDatabaseError):
             raise
         except Exception as exc:
@@ -119,7 +143,7 @@ class AnalystAgent:
             text=parsed_response.summary,
             response=parsed_response,
             blocks=parsed_response.blocks,
-            data=[artifact.model_dump() for artifact in response.get("artifacts", [])],
+            data=artifact_store.values(),
             metadata=parsed_response.metadata,
         )
 

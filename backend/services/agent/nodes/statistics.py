@@ -10,13 +10,13 @@ class StatisticsNode(SpecialistNodeBase):
     tools = statistics_tools
 
     def context_messages(self, state, active_step):
-        grant = next((item for item in state.statistics_grants if item.step_id == active_step.id), None)
+        grants = state.get("statistics_grants", []) if isinstance(state, dict) else state.statistics_grants
+        grant = next((item for item in grants if item.step_id == active_step.id), None)
         if grant is None:
             return []
         return [SystemMessage(content=(
             "[DATASET_AUTORIZADO]\n"
             f"grant_id: {grant.grant_id}\nstep_id: {grant.step_id}\n"
             f"modo: {grant.mode}; filas: {grant.row_count}; columnas: {grant.columns}\n"
-            f"muestra segura: {grant.sample}\n"
             "Puedes usar run_statistics_python únicamente con estos grant_id y step_id."
         ))]

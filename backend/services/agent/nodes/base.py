@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from backend.models.blocks import MarkdownBlock
 from backend.services.agent.state import (
     AgentConfiguration,
-    AgentState,
     SpecialistContribution,
     SpecialistName,
 )
@@ -55,7 +54,7 @@ def sanitize_tool_calls_in_messages(messages: list[BaseMessage]) -> list[BaseMes
 
 class NodeBase(ABC):
     @abstractmethod
-    def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    def __call__(self, state: Any, config: RunnableConfig) -> dict[str, Any]:
         """
         Execute the logic for this node in the Langgraph workflow.
 
@@ -77,10 +76,10 @@ class SpecialistNodeBase(NodeBase):
     tools: ClassVar[list]
     require_initial_tool_call: ClassVar[bool] = False
 
-    def context_messages(self, state: AgentState, active_step) -> list[SystemMessage]:
+    def context_messages(self, state: Any, active_step: Any) -> list[SystemMessage]:
         return []
 
-    def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    def __call__(self, state: Any, config: RunnableConfig) -> dict[str, Any]:
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
         except ValidationError as exc:
@@ -89,22 +88,27 @@ class SpecialistNodeBase(NodeBase):
         agent_config.database_service.get_database(
             agent_config.runtime_db_id, user_id=agent_config.user_id
         )
-        if not state.pending_steps:
+        get_value = state.get if isinstance(state, dict) else lambda key, default=None: getattr(state, key, default)
+        active_task = get_value("task")
+        if active_task is None:
+            pending_steps = get_value("pending_steps", [])
+            active_task = pending_steps[0] if pending_steps else None
+        if active_task is None:
             return {}
-        active_step = state.pending_steps[0]
-        if active_step.specialist != self.step:
+        if active_task.specialist != self.step:
             return {}
 
         llm = agent_config.llm_service._build_client()
+        state_messages = get_value("messages", []) or []
         messages = [
             SystemMessage(content=self.system_prompt),
             SystemMessage(
                 content=(
-                    "Objetivo de esta etapa: " + active_step.objective
+                    "Objetivo de esta etapa: " + active_task.objective
                     + "\nUsa solo evidencia verificada por tus herramientas."
                 )
             ),
-        ] + self.context_messages(state, active_step) + sanitize_tool_calls_in_messages(list(state.messages))
+        ] + self.context_messages(state, active_task) + sanitize_tool_calls_in_messages(list(state_messages))
         tool_names = {tool.name for tool in self.tools}
         has_tool_attempt = any(
             any(
@@ -112,11 +116,14 @@ class SpecialistNodeBase(NodeBase):
                 in tool_names
                 for call in getattr(message, "tool_calls", [])
             )
-            for message in state.messages
+            for message in state_messages
         )
         # No usamos ``tool_choice="required"``: algunos proveedores lo rechazan
         # para modelos con modo thinking. El segundo intento conserva el contrato
         # estándar de tools y únicamente refuerza la instrucción para el modelo.
+        # Tool calls inside a specialist stay serial unless a future specialist
+        # explicitly opts into a safe, independent tool policy. Task-level
+        # parallelism is handled by the parent graph with Send.
         bound_llm = llm.bind_tools(self.tools, parallel_tool_calls=False)
         try:
             response = bound_llm.invoke(
@@ -147,7 +154,8 @@ class SpecialistNodeBase(NodeBase):
         if getattr(response, "tool_calls", None):
             return {"messages": [response]}
 
-        available_metadata = state_metadata(state.artifacts)
+        state_artifacts = get_value("artifacts", []) or []
+        available_metadata = state_metadata(state_artifacts)
         contribution_prompt = messages + [response, SystemMessage(content="""
 Convierte los hallazgos verificados en piezas de presentación reutilizables.
 Propón solo narrativa MarkdownBlock; las métricas, tablas y gráficas provienen
@@ -163,7 +171,7 @@ disponible. El texto explicativo normal sigue siendo válido.
         contribution_prompt.append(
             SystemMessage(content="[METADATA_VERIFICADA]\n" + str(sorted(available_metadata)))
         )
-        artifact_ids = [artifact.tool_call_id for artifact in state.artifacts if artifact.ok]
+        artifact_ids = [artifact.tool_call_id for artifact in state_artifacts if artifact.ok]
         try:
             contribution = llm.with_structured_output(
                 SpecialistContribution, method="json_schema"
@@ -172,7 +180,8 @@ disponible. El texto explicativo normal sigue siendo válido.
                 config={"configurable": config.get("configurable", {})},
             )
             contribution = SpecialistContribution.model_validate(contribution)
-            contribution.step_id = active_step.id
+            contribution.task_id = active_task.id
+            contribution.step_id = active_task.id
             contribution.specialist = self.step
             contribution.artifact_ids = [
                 artifact_id for artifact_id in contribution.artifact_ids if artifact_id in artifact_ids
@@ -180,7 +189,8 @@ disponible. El texto explicativo normal sigue siendo válido.
         except Exception:
             narrative = str(response.content).strip() or "Análisis completado."
             contribution = SpecialistContribution(
-                step_id=active_step.id,
+                task_id=active_task.id,
+                step_id=active_task.id,
                 specialist=self.step,
                 summary=narrative,
                 artifact_ids=artifact_ids,
@@ -195,7 +205,6 @@ disponible. El texto explicativo normal sigue siendo válido.
 
         return {
             "messages": [response],
-            "pending_steps": state.pending_steps[1:],
-            "completed_steps": [active_step],
             "contributions": [contribution],
+            "completed": True,
         }

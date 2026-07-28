@@ -4,6 +4,7 @@ from .sql import SqlNode
 from .statistics import StatisticsNode
 from .statistics_grant import StatisticsGrantNode
 from .visualization import VisualizationNode
+from .quality import QualityNode
 
 __all__ = [
     "NodeBase",
@@ -12,4 +13,5 @@ __all__ = [
     "StatisticsNode",
     "StatisticsGrantNode",
     "VisualizationNode",
+    "QualityNode",
 ]

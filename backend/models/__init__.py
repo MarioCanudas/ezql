@@ -15,6 +15,7 @@ from .statistics import (
 )
 from .metadata import MessageMetadata, MetadataValue
 from .agents import AgentReply
+from .agent_runs import AgentRuns
 from .chats import ChatBase, ChatCreate, ChatRead, Chats, ChatSummary, ChatUpdate
 from .databases import DatabaseBase, DatabaseCreate, DatabaseRead, Databases
 from .engines import EngineBase, EngineCreate, EngineRead, Engines
@@ -51,6 +52,7 @@ from .users import (
 
 __all__ = [
     "AgentReply",
+    "AgentRuns",
     "AgentResponse",
     "ChartBlock",
     "DataBlock",

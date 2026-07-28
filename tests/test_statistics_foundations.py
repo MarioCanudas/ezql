@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from backend.models.statistics import AnalysisScope
+from backend.models.statistics import AnalysisFilter, AnalysisScope
 from backend.services.user_database import UserDatabase
 
 
@@ -44,7 +44,7 @@ def test_profile_and_describe_metric_return_exact_foundations(statistics_databas
 
 def test_filters_ranking_and_aggregated_trend(statistics_database):
     database, runtime_id = statistics_database
-    filtered = AnalysisScope(table_name="sales", dimension_column="region", metric_column="amount", aggregation="sum", filters=[{"column": "status", "operator": "eq", "value": "won"}])
+    filtered = AnalysisScope(table_name="sales", dimension_column="region", metric_column="amount", aggregation="sum", filters=[AnalysisFilter(column="status", operator="eq", value="won")])
     comparison = database.compare_segments_pandas(runtime_id, user_id=1, scope=filtered)
     assert comparison["leader"]["region"] == "West"
     assert comparison["leader"]["value"] == 500.0

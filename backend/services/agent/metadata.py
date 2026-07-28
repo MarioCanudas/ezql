@@ -101,7 +101,7 @@ def presentation_catalog(
             candidates.append(PresentationCandidate(
                 id=f"{artifact_id}.chart",
                 tool_call_id=artifact_id,
-                block=adapter.validate_python(chart),
+                block=adapter.validate_python({"type": "chart", **chart}),
             ))
         except Exception:
             pass

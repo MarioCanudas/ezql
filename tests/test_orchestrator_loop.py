@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+from langchain_core.runnables import RunnableConfig
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
@@ -26,7 +27,7 @@ from backend.services.agent.state import (
 from backend.services.user_database import UserDatabase
 
 
-def _config(database: UserDatabase, runtime_db_id: str) -> dict:
+def _config(database: UserDatabase, runtime_db_id: str) -> RunnableConfig:
     return {
         "configurable": {
             "database_service": database,
@@ -47,7 +48,7 @@ def test_orchestrator_enqueues_a_complementary_plan(mock_build_client):
         review.invoke.return_value = InvestigationDecision(
             action="continue",
             reason="Falta segmentar la caída.",
-            steps=[PlanStep(specialist="sql", objective="Comparar categorías por período")],
+            tasks=[PlanStep(specialist="sql", objective="Comparar categorías por período")],
         )
         llm.with_structured_output.return_value = review
         mock_build_client.return_value = llm

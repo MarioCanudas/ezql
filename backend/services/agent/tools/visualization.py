@@ -115,7 +115,7 @@ def create_line_chart(
         numeric_expression = f'CAST(SUBSTR("{y_column}", 1, INSTR("{y_column}", " ") - 1) AS REAL)'
     where_parts = [f'"{x_column}" IS NOT NULL', f'"{y_column}" IS NOT NULL']
     if filter_column:
-        escaped_value = filter_value.replace("'", "''")
+        escaped_value = (filter_value or "").replace("'", "''")
         where_parts.append(f'"{filter_column}" = \'{escaped_value}\'')
     where_clause = " AND ".join(where_parts)
 

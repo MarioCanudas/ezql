@@ -25,21 +25,30 @@ class StatisticsGrantNode(NodeBase):
     """Creates a bounded snapshot before the statistics specialist starts."""
 
     def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-        if not state.pending_steps or state.pending_steps[0].specialist != "statistics":
+        get_value = state.get if isinstance(state, dict) else lambda key, default=None: getattr(state, key, default)
+        active_task = get_value("task")
+        if active_task is None:
+            pending_steps = get_value("pending_steps", [])
+            active_task = pending_steps[0] if pending_steps else None
+        if active_task is None or active_task.specialist != "statistics":
             return {}
-        active_step = state.pending_steps[0]
-        if any(grant.step_id == active_step.id for grant in state.statistics_grants):
+        if any(grant.step_id == active_task.id for grant in get_value("statistics_grants", []) or []):
             return {}
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
         except ValidationError as exc:
             raise ValueError(f"Invalid configuration in config['configurable']: {exc}") from exc
 
-        evidence = [
-            {"tool": artifact.tool_name, "ok": artifact.ok, "data": artifact.data}
-            for artifact in state.artifacts
-            if artifact.ok
-        ]
+        evidence = []
+        for artifact in get_value("artifacts", []) or []:
+            if not artifact.ok:
+                continue
+            payload = (
+                agent_config.artifact_store.get(artifact.tool_call_id)
+                if agent_config.artifact_store is not None
+                else None
+            )
+            evidence.append({"tool": artifact.tool_name, "ok": artifact.ok, "data": payload.get("data") if payload else artifact.data})
         if not evidence:
             return {}
         try:
@@ -49,7 +58,7 @@ class StatisticsGrantNode(NodeBase):
                 [
                     SystemMessage(content=STATISTICS_GRANT_PROMPT),
                     HumanMessage(content=json.dumps({
-                        "objective": active_step.objective,
+                        "objective": active_task.objective,
                         "evidence": evidence,
                     }, ensure_ascii=False, default=str)),
                 ],
@@ -60,7 +69,7 @@ class StatisticsGrantNode(NodeBase):
                 database_service=agent_config.database_service,
                 runtime_db_id=agent_config.runtime_db_id,
                 user_id=agent_config.user_id,
-                step_id=active_step.id,
+                step_id=active_task.id,
                 request=request,
             )
         except Exception:

@@ -1,5 +1,6 @@
 import os
 from collections.abc import Sequence
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -137,7 +138,7 @@ class AgentChat(BaseModel):
             or "r1" in model_lower
         )
 
-        client_kwargs: dict[str, object] = {
+        client_kwargs: dict[str, Any] = {
             "model": resolved_model,
             "api_key": SecretStr(api_key),
             "base_url": base_url,

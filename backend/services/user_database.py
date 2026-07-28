@@ -6,6 +6,7 @@ import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic import JsonValue
 
@@ -396,8 +397,8 @@ class UserDatabase:
             df = df.sort_values('date')
             if len(df) < 2:
                 return {"error": "No hay suficientes periodos para calcular una tendencia."}
-            first_value = float(df['metric'].iloc[0])
-            last_value = float(df['metric'].iloc[-1])
+            first_value = float(cast(Any, df['metric'].iloc[0]))
+            last_value = float(cast(Any, df['metric'].iloc[-1]))
             pct_change = None if first_value == 0 else ((last_value - first_value) / abs(first_value)) * 100
             direction = "up" if last_value > first_value else "down" if last_value < first_value else "stable"
             direction_text = {"up": "al alza", "down": "a la baja", "stable": "estable"}[direction]
@@ -406,7 +407,9 @@ class UserDatabase:
                 "direction": direction,
                 "pct_change": pct_change,
                 "message": f"La tendencia de {metric_column} está {direction_text}.",
-                "average_change_per_period": float(df['metric'].diff().mean()),
+                "average_change_per_period": float(
+                    cast(Any, cast(Any, df['metric']).diff().mean())
+                ),
                 "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else [],
             }
         except Exception as e:
@@ -434,7 +437,9 @@ class UserDatabase:
                 params.append(item.value)
         return (" WHERE " + " AND ".join(clauses)) if clauses else "", params
 
-    def _scope_frame(self, database_id: str, *, user_id: int, scope: AnalysisScope, columns: list[str]):
+    def _scope_frame(
+        self, database_id: str, *, user_id: int, scope: AnalysisScope, columns: list[str]
+    ) -> tuple[Any, bool]:
         import pandas as pd
         self.validate_table_columns(database_id, user_id=user_id, table_name=scope.table_name, column_names=columns)
         where, params = self._scope_where(database_id, user_id=user_id, scope=scope)
@@ -442,7 +447,7 @@ class UserDatabase:
         sql = f"SELECT {selected} FROM {quote_identifier(scope.table_name)}{where} LIMIT {MAX_ANALYTIC_ROWS + 1}"
         database = self.get_database(database_id, user_id=user_id)
         with self._connect_readonly(database.path) as connection:
-            frame = pd.read_sql_query(sql, connection, params=params)
+            frame: Any = pd.read_sql_query(sql, connection, params=params)
         truncated = len(frame) > MAX_ANALYTIC_ROWS
         return frame.iloc[:MAX_ANALYTIC_ROWS].copy(), truncated
 
@@ -455,7 +460,7 @@ class UserDatabase:
     ) -> tuple[list[dict], list[str], bool]:
         """Return a bounded, JSON-safe snapshot for the isolated statistics runtime."""
         scope = request.scope
-        required = list(dict.fromkeys([
+        required: list[str] = list(dict.fromkeys([
             *request.columns,
             *(item.column for item in scope.filters),
             *([scope.dimension_column] if scope.dimension_column else []),
@@ -513,9 +518,9 @@ class UserDatabase:
         if target is None:
             return {"error": "Indica una columna para perfilar."}
         frame, truncated = self._scope_frame(database_id, user_id=user_id, scope=scope, columns=[target])
-        series = frame[target]
-        non_null = series.dropna()
-        numeric = pd.to_numeric(non_null, errors="coerce")
+        series: Any = frame[target]
+        non_null: Any = series.dropna()
+        numeric: Any = pd.to_numeric(non_null, errors="coerce")
         inferred = "numeric" if not non_null.empty and numeric.notna().mean() >= 0.9 else "categorical"
         top_values = non_null.astype(str).value_counts().head(10).rename_axis(target).reset_index(name="count").to_dict("records")
         data = {"population": {"rows": len(frame), "valid_rows": int(non_null.size), "missing_rows": int(series.isna().sum()), "truncated": truncated}, "column": target, "inferred_type": inferred, "distinct_values": int(non_null.nunique()), "top_values": top_values, "method": "perfilado descriptivo", "warnings": self._warnings(truncated)}
@@ -527,13 +532,16 @@ class UserDatabase:
         if scope.metric_column is None:
             return {"error": "Indica la métrica a describir."}
         frame, truncated = self._scope_frame(database_id, user_id=user_id, scope=scope, columns=[scope.metric_column])
-        raw = frame[scope.metric_column]
-        values = pd.to_numeric(raw, errors="coerce").dropna()
+        raw: Any = frame[scope.metric_column]
+        numeric_values: Any = pd.to_numeric(raw, errors="coerce")
+        values: Any = numeric_values.dropna()
         if values.empty:
             return {"error": "La métrica no contiene valores numéricos válidos."}
-        q1, median, q3 = (float(values.quantile(q)) for q in (0.25, 0.5, 0.75))
+        q1, median, q3 = (float(cast(Any, values.quantile(q))) for q in (0.25, 0.5, 0.75))
         stats = {"min": float(values.min()), "max": float(values.max()), "mean": float(values.mean()), "median": median, "std_dev": float(values.std(ddof=1)) if len(values) > 1 else 0.0, "p25": q1, "p75": q3, "iqr": q3 - q1}
-        data = {"population": {"rows": len(frame), "valid_rows": len(values), "missing_rows": int(raw.isna().sum() + (pd.to_numeric(raw, errors="coerce").isna().sum() - raw.isna().sum())), "truncated": truncated}, "metric": scope.metric_column, "statistics": stats, "method": "estadística descriptiva", "warnings": self._warnings(truncated)}
+        raw_missing: Any = pd.isna(raw)
+        numeric_missing: Any = pd.isna(numeric_values)
+        data = {"population": {"rows": len(frame), "valid_rows": len(values), "missing_rows": int(raw_missing.sum() + (numeric_missing.sum() - raw_missing.sum())), "truncated": truncated}, "metric": scope.metric_column, "statistics": stats, "method": "estadística descriptiva", "warnings": self._warnings(truncated)}
         data["suggested_blocks"] = [MetricBlock(label=f"Media de {scope.metric_column}", value=f"{stats['mean']:,.2f}").model_dump(), MetricBlock(label="Mediana", value=f"{median:,.2f}").model_dump(), MetricBlock(label="Rango intercuartílico", value=f"{stats['iqr']:,.2f}").model_dump()]
         return data
 
@@ -606,7 +614,10 @@ class UserDatabase:
         if iqr == 0:
             return {"population": result["population"], "outliers": [], "method": "IQR", "message": "No se detectaron anomalías: los segmentos comparables tienen valores similares.", "warnings": result["warnings"], "suggested_blocks": [MarkdownBlock(content="No se detectaron anomalías relevantes entre los segmentos analizados.").model_dump()]}
         lower, upper = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
-        outliers = segments[(segments["value"] < lower) | (segments["value"] > upper)].to_dict("records")
+        outliers: list[dict[str, Any]] = cast(
+            list[dict[str, Any]],
+            cast(Any, segments[(segments["value"] < lower) | (segments["value"] > upper)]).to_dict("records"),
+        )
         data = {"population": result["population"], "dimension": scope.dimension_column, "outliers": outliers, "bounds": {"lower": lower, "upper": upper}, "method": "IQR (1.5 × rango intercuartílico)", "warnings": result["warnings"]}
         data["suggested_blocks"] = [MarkdownBlock(content=("No se detectaron anomalías relevantes." if not outliers else f"Se detectaron {len(outliers)} segmentos fuera del rango esperado.")).model_dump(), TableBlock(title="Segmentos atípicos", columns=list(outliers[0]) if outliers else [scope.dimension_column or "segment", "value"], data=outliers).model_dump()]
         return data
@@ -636,7 +647,9 @@ class UserDatabase:
                 return {"message": "No se detectaron anomalías en los datos analizados.", "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else []}
             return {
                 "message": f"Se encontraron {len(outliers)} anomalías.",
-                "outliers": outliers[['category', 'metric']].to_dict('records'),
+                "outliers": cast(
+                    list[dict[str, Any]], cast(Any, outliers[['category', 'metric']]).to_dict('records')
+                ),
                 "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else [],
             }
         except Exception as e:

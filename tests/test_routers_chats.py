@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from backend.models import AgentReply, Chats, Models, Users
+from backend.models import AgentReply, Chats, MetricBlock, Models, Users
 from backend.services.agent.agent_chat import LLMGenerationError
 
 
@@ -163,6 +163,30 @@ class TestChatReply:
         assert len(data) == 2  # user + assistant
         assert data[0]["role"] == "user"
         assert data[1]["role"] == "agent"
+
+    @patch("backend.routers.chats.AnalystAgent")
+    def test_reply_does_not_persist_raw_execution_payloads(
+        self,
+        mock_agent_cls,
+        client: TestClient,
+        seed_chat: Chats,
+    ):
+        mock_instance = MagicMock()
+        mock_instance.generate_reply.return_value = AgentReply(
+            text="Respuesta verificada",
+            blocks=[MetricBlock(label="Total", value="42")],
+            data=[{"ok": True, "data": {"rows_preview": [{"secret": "internal"}]}}],
+        )
+        mock_instance.llm_service.summarize_chat.return_value = "Summary"
+        mock_agent_cls.return_value = mock_instance
+
+        payload = {"content": {"text": "¿Cuántos registros hay?", "data": None}}
+        response = client.post(f"/api/v1/chats/{seed_chat.id}/reply", json=payload)
+
+        assert response.status_code == 201
+        assistant = response.json()["assistant_message"]["content"]
+        assert assistant["data"] is None
+        assert assistant["blocks"][0]["type"] == "metric"
 
     def test_reply_empty_content_returns_400(
         self,

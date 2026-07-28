@@ -24,6 +24,7 @@ from .visualization import (
     create_line_chart,
     create_scatter_chart,
 )
+from .quality import quality_tools
 
 sql_tools = [
     get_schema,
@@ -56,4 +57,5 @@ __all__ = [
     "sql_tools",
     "statistics_tools",
     "visualization_tools",
+    "quality_tools",
 ]

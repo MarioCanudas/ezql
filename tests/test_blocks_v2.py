@@ -1,5 +1,7 @@
 """Tests for the new Block-Based UI architecture and AgentResponse contracts."""
 
+from typing import Literal, cast
+
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
@@ -90,7 +92,8 @@ def test_sql_block_is_excluded():
 
 def test_chart_block_types():
     """Valida los tipos de chart_type permitidos."""
-    for chart_type in ["bar", "line", "area", "scatter"]:
+    chart_types = cast(list[Literal["bar", "line", "area", "scatter"]], ["bar", "line", "area", "scatter"])
+    for chart_type in chart_types:
         cb = ChartBlock(
             chart_type=chart_type,
             x_axis="x",
@@ -101,7 +104,7 @@ def test_chart_block_types():
 
     with pytest.raises(ValidationError):
         ChartBlock(
-            chart_type="pie",  # Not in allowed literal
+            chart_type=cast(Literal["bar", "line", "area", "scatter"], "pie"),
             x_axis="x",
             y_axis=["y"],
             data=[]

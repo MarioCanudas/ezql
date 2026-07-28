@@ -1,8 +1,12 @@
+from datetime import datetime
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlmodel import Session, col, delete, select
 
 from backend.models import (
+    AgentRuns,
     ChatCreate,
     ChatRead,
     ChatReplyRequest,
@@ -20,7 +24,10 @@ from backend.models import (
 )
 from backend.services.agent.agent_chat import AgentChat, resolve_llm_provider
 from backend.services.agent import AnalystAgent
+from backend.services.agent.checkpoint import get_checkpoint_store
+from backend.services.agent.locks import chat_execution_locks
 from backend.services.user_database import UserDatabase
+from backend.models.blocks import FlexibleDataBlock
 from backend.utils.dependencies import get_runtime_database_service, get_session
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -231,26 +238,56 @@ def generate_reply(
 
     summary_service: AgentChat
     if chat.runtime_db_id:
-        service = AnalystAgent(
-            database_service=runtime_database_service,
-            model_name=model.name,
-            provider=model.company,
-            api_key=api_key,
+        if user_message.id is None:
+            raise HTTPException(status_code=500, detail="User message id missing.")
+        thread_id = f"chat:{chat_id}:message:{user_message.id}"
+        run = AgentRuns(
+            chat_id=chat_id,
+            message_id=user_message.id,
+            thread_id=thread_id,
+            status="running",
         )
-        summary_service = service.llm_service
-        agent_reply = service.generate_reply(
-            user_message=payload.content.text,
-            history=history,
-            summary=chat.summary,
-            runtime_db_id=chat.runtime_db_id,
-            user_id=chat.user_id,
-        )
-        assistant_content = Content(
-            text=agent_reply.text,
-            blocks=agent_reply.blocks,
-            data=agent_reply.data,
-            metadata=agent_reply.metadata,
-        )
+        session.add(run)
+        session.commit()
+        try:
+            with chat_execution_locks.acquire(chat_id):
+                service = AnalystAgent(
+                    database_service=runtime_database_service,
+                    model_name=model.name,
+                    provider=model.company,
+                    api_key=api_key,
+                )
+                summary_service = service.llm_service
+                agent_reply = service.generate_reply(
+                    user_message=payload.content.text,
+                    history=history,
+                    summary=chat.summary,
+                    runtime_db_id=chat.runtime_db_id,
+                    user_id=chat.user_id,
+                    thread_id=thread_id,
+                )
+                assistant_content = Content(
+                    text=agent_reply.text,
+                    blocks=cast(
+                        list[FlexibleDataBlock] | None,
+                        agent_reply.blocks,
+                    ),
+                    # Raw tool payloads remain execution-local. The public
+                    # response is represented by blocks and verified metadata.
+                    data=None,
+                    metadata=agent_reply.metadata,
+                )
+            run.status = "completed"
+            run.completed_at = datetime.now()
+            session.add(run)
+            session.commit()
+        except Exception as exc:
+            run.status = "failed"
+            run.error_code = type(exc).__name__
+            run.completed_at = datetime.now()
+            session.add(run)
+            session.commit()
+            raise
     else:
         service = AgentChat(
             model_name=model.name,
@@ -299,6 +336,11 @@ def delete_chat(chat_id: int, session: Session = Depends(get_session)):
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found.")
 
+    thread_ids = list(session.exec(
+        select(AgentRuns.thread_id).where(col(AgentRuns.chat_id) == chat_id)
+    ).all())
+    get_checkpoint_store().delete_threads(thread_ids)
+    session.exec(delete(AgentRuns).where(col(AgentRuns.chat_id) == chat_id))
     session.exec(delete(Messages).where(col(Messages.chat_id) == chat_id))
     session.delete(chat)
     session.commit()
