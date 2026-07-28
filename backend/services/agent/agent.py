@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 from backend.models import AgentReply, Messages, AgentResponse, MarkdownBlock
 from backend.services.agent.agent_chat import (
@@ -97,7 +99,7 @@ class AnalystAgent:
         initial_state = AgentState()
         artifact_store = ExecutionArtifactStore()
 
-        config_dict = {
+        config_dict: dict[str, Any] = {
             "database_service": self.database_service,
             "llm_service": self.llm_service,
             "runtime_db_id": runtime_db_id,
@@ -107,7 +109,7 @@ class AnalystAgent:
             "input_messages": chat_messages,
             "thread_id": thread_id,
         }
-        graph_config = {
+        graph_config: RunnableConfig = {
             "configurable": {
                 **config_dict,
                 "thread_id": thread_id or f"ephemeral-{user_id}-{id(initial_state)}",

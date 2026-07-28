@@ -1,10 +1,13 @@
+
+from langchain_core.runnables import RunnableConfig
+
 from backend.services.agent.agent_chat import AgentChat
 from backend.services.agent.tools.statistics import describe_metric, detect_outliers
 from backend.services.agent.tools.visualization import create_bar_chart, create_line_chart
 from backend.services.user_database import UserDatabase
 
 
-def _tool_config(database: UserDatabase, runtime_db_id: str) -> dict:
+def _tool_config(database: UserDatabase, runtime_db_id: str) -> RunnableConfig:
     return {
         "configurable": {
             "database_service": database,

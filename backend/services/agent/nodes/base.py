@@ -7,8 +7,6 @@ from pydantic import ValidationError
 from backend.models.blocks import MarkdownBlock
 from backend.services.agent.state import (
     AgentConfiguration,
-    AgentState,
-    SpecialistState,
     SpecialistContribution,
     SpecialistName,
 )
@@ -56,7 +54,7 @@ def sanitize_tool_calls_in_messages(messages: list[BaseMessage]) -> list[BaseMes
 
 class NodeBase(ABC):
     @abstractmethod
-    def __call__(self, state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+    def __call__(self, state: Any, config: RunnableConfig) -> dict[str, Any]:
         """
         Execute the logic for this node in the Langgraph workflow.
 
@@ -78,10 +76,10 @@ class SpecialistNodeBase(NodeBase):
     tools: ClassVar[list]
     require_initial_tool_call: ClassVar[bool] = False
 
-    def context_messages(self, state: AgentState, active_step) -> list[SystemMessage]:
+    def context_messages(self, state: Any, active_step: Any) -> list[SystemMessage]:
         return []
 
-    def __call__(self, state: SpecialistState, config: RunnableConfig) -> dict[str, Any]:
+    def __call__(self, state: Any, config: RunnableConfig) -> dict[str, Any]:
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
         except ValidationError as exc:
@@ -101,7 +99,7 @@ class SpecialistNodeBase(NodeBase):
             return {}
 
         llm = agent_config.llm_service._build_client()
-        state_messages = get_value("messages", [])
+        state_messages = get_value("messages", []) or []
         messages = [
             SystemMessage(content=self.system_prompt),
             SystemMessage(
@@ -156,7 +154,7 @@ class SpecialistNodeBase(NodeBase):
         if getattr(response, "tool_calls", None):
             return {"messages": [response]}
 
-        state_artifacts = get_value("artifacts", [])
+        state_artifacts = get_value("artifacts", []) or []
         available_metadata = state_metadata(state_artifacts)
         contribution_prompt = messages + [response, SystemMessage(content="""
 Convierte los hallazgos verificados en piezas de presentación reutilizables.

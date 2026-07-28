@@ -20,11 +20,11 @@ class ArtifactCollectorNode(NodeBase):
         except Exception:
             agent_config = None
         get_value = state.get if isinstance(state, dict) else lambda key, default=None: getattr(state, key, default)
-        known_ids = set(get_value("processed_tool_call_ids", []))
+        known_ids = set(get_value("processed_tool_call_ids", []) or [])
         artifacts: list[ToolArtifact] = []
         processed: list[str] = []
 
-        for message in get_value("messages", []):
+        for message in get_value("messages", []) or []:
             if not isinstance(message, ToolMessage) or not message.tool_call_id:
                 continue
             if message.tool_call_id in known_ids:

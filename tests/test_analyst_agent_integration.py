@@ -180,7 +180,7 @@ class TestAnalystAgentIntegration:
 
         planner_llm = MagicMock()
         planner_llm.invoke.return_value = ExecutionPlan(
-            steps=[PlanStep(specialist="sql", objective="Contar títulos")]
+            tasks=[PlanStep(specialist="sql", objective="Contar títulos")]
         )
         contribution_llm = MagicMock()
         contribution_llm.invoke.return_value = SpecialistContribution(
@@ -272,7 +272,7 @@ class TestAnalystAgentIntegration:
 
         planner_llm = MagicMock()
         planner_llm.invoke.return_value = ExecutionPlan(
-            steps=[PlanStep(specialist="visualization", objective="Mostrar tendencia de duración")]
+            tasks=[PlanStep(specialist="visualization", objective="Mostrar tendencia de duración")]
         )
         contribution_llm = MagicMock()
         contribution_llm.invoke.return_value = SpecialistContribution(

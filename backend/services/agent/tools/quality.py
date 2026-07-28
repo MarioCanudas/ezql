@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any, cast
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import ValidationError
@@ -55,7 +56,7 @@ def assess_data_quality(
     except Exception:
         return tool_failure("No fue posible evaluar la calidad de los datos disponibles.")
 
-    row = result.rows[0] if result.rows else {}
+    row = cast(dict[str, Any], result.rows[0] if result.rows else {})
     total_rows = int(row.get("total_rows") or 0)
     schema = agent_config.database_service.get_schema(
         agent_config.runtime_db_id,
@@ -82,7 +83,7 @@ def assess_data_quality(
                 ),
             )
             observed_types = {
-                str(item.get("observed_type") or "null"): int(item.get("count") or 0)
+                str(item.get("observed_type") or "null"): int(cast(Any, item.get("count") or 0))
                 for item in type_result.rows
             }
         except Exception:
@@ -113,7 +114,7 @@ def assess_data_quality(
             sql=duplicate_sql,
         )
         if duplicate_result.rows:
-            duplicate_rows = int(duplicate_result.rows[0].get("duplicate_rows") or 0)
+            duplicate_rows = int(cast(Any, duplicate_result.rows[0].get("duplicate_rows") or 0))
     except Exception:
         # Duplicate analysis is advisory; preserve the reliable null/cardinality
         # results if a dialect-specific grouping operation is unavailable.

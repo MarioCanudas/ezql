@@ -32,7 +32,7 @@ class StatisticsGrantNode(NodeBase):
             active_task = pending_steps[0] if pending_steps else None
         if active_task is None or active_task.specialist != "statistics":
             return {}
-        if any(grant.step_id == active_task.id for grant in get_value("statistics_grants", [])):
+        if any(grant.step_id == active_task.id for grant in get_value("statistics_grants", []) or []):
             return {}
         try:
             agent_config = AgentConfiguration.model_validate(config.get("configurable", {}))
@@ -40,7 +40,7 @@ class StatisticsGrantNode(NodeBase):
             raise ValueError(f"Invalid configuration in config['configurable']: {exc}") from exc
 
         evidence = []
-        for artifact in get_value("artifacts", []):
+        for artifact in get_value("artifacts", []) or []:
             if not artifact.ok:
                 continue
             payload = (

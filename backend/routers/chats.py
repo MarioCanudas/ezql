@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
@@ -26,6 +27,7 @@ from backend.services.agent import AnalystAgent
 from backend.services.agent.checkpoint import get_checkpoint_store
 from backend.services.agent.locks import chat_execution_locks
 from backend.services.user_database import UserDatabase
+from backend.models.blocks import FlexibleDataBlock
 from backend.utils.dependencies import get_runtime_database_service, get_session
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -266,7 +268,10 @@ def generate_reply(
                 )
                 assistant_content = Content(
                     text=agent_reply.text,
-                    blocks=agent_reply.blocks,
+                    blocks=cast(
+                        list[FlexibleDataBlock] | None,
+                        agent_reply.blocks,
+                    ),
                     # Raw tool payloads remain execution-local. The public
                     # response is represented by blocks and verified metadata.
                     data=None,
@@ -332,10 +337,10 @@ def delete_chat(chat_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Chat not found.")
 
     thread_ids = list(session.exec(
-        select(AgentRuns.thread_id).where(AgentRuns.chat_id == chat_id)
+        select(AgentRuns.thread_id).where(col(AgentRuns.chat_id) == chat_id)
     ).all())
     get_checkpoint_store().delete_threads(thread_ids)
-    session.exec(delete(AgentRuns).where(AgentRuns.chat_id == chat_id))
+    session.exec(delete(AgentRuns).where(col(AgentRuns.chat_id) == chat_id))
     session.exec(delete(Messages).where(col(Messages.chat_id) == chat_id))
     session.delete(chat)
     session.commit()
