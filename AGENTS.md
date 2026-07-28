@@ -210,8 +210,17 @@ and failure behavior; they must not hide validation errors, unsupported provider
 features, swallowed exceptions, or incorrect persistence. Add as many tests as the
 behavior requires, with no arbitrary test-count limit.
 
+Before considering any implementation complete, verification MUST include all three
+of the following steps:
+
+1. Run the individual tests corresponding to the implementation or behavior changed.
+2. Run `uv run basedpyright` and resolve every reported type error.
+3. Run `uv run ruff check` and resolve every reported lint error.
+
 Run `uv run pytest` after agent, metadata, statistics, sandbox or renderer
 changes. Cover exact descriptive metrics, typed filters, missing periods and
 zero values, segment ranking, IQR edge cases, candidate ordering and fallback,
 invalid references, frontend rendering without payload mutation, and historical
-messages without metadata. Use `uv run ruff check` for linting.
+messages without metadata. Use `uv run ruff check` for linting and
+`uv run basedpyright` for static type checking. Both checks are required before
+considering an implementation complete.
