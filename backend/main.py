@@ -13,6 +13,7 @@ from backend.services.user_database import (
 )
 from backend.services.agent.agent_chat import LLMConfigurationError, LLMGenerationError
 from backend.utils.dependencies import ServiceRegistry
+from backend.services.agent.checkpoint import close_checkpoint_store
 
 ENV_PATH = Path(__file__).resolve().parents[1] / "frontend" / ".env"
 load_dotenv(ENV_PATH)
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
         print(f"Error during database connection: {e}")
     finally:
         print("Cleaning up services...")
+        close_checkpoint_store()
         ServiceRegistry.clear()
         print("Services cleanup complete.")
 

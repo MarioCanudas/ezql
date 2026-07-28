@@ -55,7 +55,9 @@ class StatisticsGrantStore:
             row_count=len(records),
             truncated=truncated,
             warnings=warnings,
-            sample=records[:5],
+            # A descriptor may cross the durable graph boundary. Keep the
+            # materialized rows exclusively in this execution-local store.
+            sample=[],
         )
         grant = _Grant(
             descriptor=descriptor,
