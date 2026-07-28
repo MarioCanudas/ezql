@@ -51,6 +51,100 @@ class TestAnalystAgentIntegration:
         assert res.rows[0]["total"] == 8808
 
     @patch("backend.services.agent.agent_chat.AgentChat._build_client")
+    def test_realistic_provider_fallback_preserves_agent_response(
+        self, mock_build_client, real_sample_db, caplog
+    ):
+        """Exercise the graph with raw provider JSON and schema incompatibility."""
+
+        db_service, read_db = real_sample_db
+
+        class StructuredResult:
+            def __init__(self, schema_name: str, method: str):
+                self.schema_name = schema_name
+                self.method = method
+
+            def invoke(self, messages, config=None):
+                if self.schema_name == "ExecutionPlan":
+                    if self.method == "json_schema":
+                        raise RuntimeError("provider does not support json_schema")
+                    # Deliberately omit id: normalization must repair it.
+                    return {
+                        "tasks": [{
+                            "specialist": "sql",
+                            "objective": "Contar los registros disponibles",
+                        }]
+                    }
+                if self.schema_name == "SpecialistContribution":
+                    return {
+                        "specialist": "sql",
+                        "summary": "La base contiene registros disponibles.",
+                        "blocks": [{
+                            "type": "markdown",
+                            "content": "El conteo fue verificado directamente en la base.",
+                        }],
+                    }
+                if self.schema_name == "InvestigationDecision":
+                    return {
+                        "action": "finalize",
+                        "reason": "La evidencia responde la consulta.",
+                    }
+                if self.schema_name == "ResponseSelection":
+                    if self.method == "json_schema":
+                        raise RuntimeError("provider does not support json_schema")
+                    return {
+                        "summary": "Encontré el conteo verificado de la base.",
+                        "narrative": "El conteo fue verificado directamente en la base.",
+                        "candidate_ids": ["call-real-count.block.0"],
+                    }
+                raise AssertionError(f"Unexpected schema: {self.schema_name}")
+
+        class RealisticProviderClient:
+            def __init__(self):
+                self.tool_called = False
+
+            def with_structured_output(self, schema, method="json_schema"):
+                return StructuredResult(schema.__name__, method)
+
+            def bind_tools(self, tools, **kwargs):
+                return self
+
+            def invoke(self, messages, config=None):
+                if not self.tool_called:
+                    self.tool_called = True
+                    return AIMessage(
+                        content="",
+                        tool_calls=[{
+                            "name": "count_rows",
+                            "args": {"table_name": "netflix_titles"},
+                            "id": "call-real-count",
+                            "type": "tool_call",
+                        }],
+                    )
+                return AIMessage(content="El conteo quedó verificado.")
+
+        mock_build_client.return_value = RealisticProviderClient()
+        agent = AnalystAgent(
+            database_service=db_service,
+            model_name="deepseek-v4",
+            provider="deepseek",
+            api_key="test-key",
+        )
+
+        reply = agent.generate_reply(
+            user_message="Hazme un resumen de la base de datos.",
+            history=[],
+            summary=None,
+            runtime_db_id=read_db.id,
+            user_id=1,
+        )
+
+        assert reply.text == "Encontré el conteo verificado de la base."
+        assert any(block.type == "markdown" for block in reply.blocks or [])
+        assert any(block.type == "metric" for block in reply.blocks or [])
+        assert "Structured planner output" in caplog.text
+        assert "Structured selection output" in caplog.text
+
+    @patch("backend.services.agent.agent_chat.AgentChat._build_client")
     def test_analyst_agent_graph_query_flow(self, mock_build_client, real_sample_db):
         db_service, read_db = real_sample_db
 
