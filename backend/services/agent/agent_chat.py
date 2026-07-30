@@ -2,9 +2,11 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
+import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, PrivateAttr, SecretStr, field_validator
 
 from backend.models import Content, LLMProviderConfig, Messages, Role
 from backend.prompts import DEFAULT_SYSTEM_PROMPT, SUMMARY_SYSTEM_PROMPT
@@ -72,6 +74,13 @@ class AgentChat(BaseModel):
     temperature: float = 0.2
     reasoning_effort: str | None = None
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    _client: ChatOpenAI | None = PrivateAttr(default=None)
+    _http_client: httpx.Client | None = PrivateAttr(default=None)
+
+    def with_http_client(self, client: httpx.Client | None) -> "AgentChat":
+        clone = self.model_copy()
+        clone._http_client = client
+        return clone
 
     @field_validator("api_key")
     @classmethod
@@ -116,6 +125,8 @@ class AgentChat(BaseModel):
         return PROVIDER_CONFIGS[provider_key]
 
     def _build_client(self) -> ChatOpenAI:
+        if self._client is not None:
+            return self._client
         config = self._get_provider_config()
         api_key = (self.api_key or "").strip()
         if not api_key:
@@ -153,8 +164,37 @@ class AgentChat(BaseModel):
 
         if effort:
             client_kwargs["reasoning_effort"] = effort
+        if self._http_client is not None:
+            client_kwargs["http_client"] = self._http_client
+        self._client = ChatOpenAI(**client_kwargs)
+        return self._client
 
-        return ChatOpenAI(**client_kwargs)
+    def bind_tools(self, tools: list[Any], *, parallel_tool_calls: bool = False):
+        return self._build_client().bind_tools(tools, parallel_tool_calls=parallel_tool_calls)
+
+    def invoke_structured(self, schema: type[BaseModel], messages: list[Any], *, config: RunnableConfig, label: str):
+        try:
+            return self._build_client().with_structured_output(schema, method="json_schema").invoke(messages, config=config)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Structured %s output with json_schema failed; retrying json_mode (%s)", label, type(exc).__name__)
+            # Some OpenAI-compatible providers require the literal word "JSON"
+            # in the prompt when response_format=json_object is used. Keep this
+            # guarantee in the shared fallback instead of relying on every
+            # structured-output prompt to remember it.
+            json_mode_messages = [
+                *messages,
+                SystemMessage(
+                    content=(
+                        "Devuelve exclusivamente un objeto JSON válido que cumpla "
+                        "el esquema solicitado."
+                    )
+                ),
+            ]
+            return self._build_client().with_structured_output(schema, method="json_mode").invoke(
+                json_mode_messages,
+                config=config,
+            )
 
     def _message_text(self, response_content) -> str:
         if isinstance(response_content, str):

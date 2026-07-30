@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlmodel import Session, col, delete, select
 
@@ -25,12 +25,33 @@ from backend.models import (
 from backend.services.agent.agent_chat import AgentChat, resolve_llm_provider
 from backend.services.agent import AnalystAgent
 from backend.services.agent.checkpoint import get_checkpoint_store
-from backend.services.agent.locks import chat_execution_locks
+from backend.services.agent.locks import ChatBusyError, chat_execution_locks
 from backend.services.user_database import UserDatabase
 from backend.models.blocks import FlexibleDataBlock
 from backend.utils.dependencies import get_runtime_database_service, get_session
+from backend.utils.dependencies import ServiceRegistry
 
 router = APIRouter(prefix="/chats", tags=["chats"])
+
+CONTEXT_MESSAGE_LIMIT = 12
+UNSUMMARIZED_MESSAGE_LIMIT = 12
+
+
+def _summarize_chat_background(
+    *, chat_id: int, messages: list[Messages], service: AgentChat, base_summary: str | None, target_message_id: int
+) -> None:
+    try:
+        summary = service.summarize_chat(messages, current_summary=base_summary)
+        with Session(ServiceRegistry.get_db_connection().engine) as session:
+            chat = session.get(Chats, chat_id)
+            if chat is None or (chat.summary_through_message_id or 0) >= target_message_id:
+                return
+            chat.summary = summary
+            chat.summary_through_message_id = target_message_id
+            session.add(chat)
+            session.commit()
+    except Exception:
+        return
 
 
 def _to_message_read(message: Messages) -> MessageRead:
@@ -189,6 +210,7 @@ def update_chat(
 def generate_reply(
     chat_id: int,
     payload: ChatReplyRequest,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     runtime_database_service: UserDatabase = Depends(
         get_runtime_database_service
@@ -230,11 +252,12 @@ def generate_reply(
     session.commit()
     session.refresh(user_message)
 
-    history = session.exec(
-        select(Messages)
-        .where(col(Messages.chat_id) == chat_id)
-        .order_by(col(Messages.sent_at).asc(), col(Messages.id).asc())
-    ).all()
+    history_stmt = select(Messages).where(col(Messages.chat_id) == chat_id)
+    if chat.summary_through_message_id is not None:
+        history_stmt = history_stmt.where(col(Messages.id) > chat.summary_through_message_id)
+    history = list(reversed(session.exec(
+        history_stmt.order_by(col(Messages.sent_at).desc(), col(Messages.id).desc()).limit(CONTEXT_MESSAGE_LIMIT)
+    ).all()))
 
     summary_service: AgentChat
     if chat.runtime_db_id:
@@ -256,6 +279,7 @@ def generate_reply(
                     model_name=model.name,
                     provider=model.company,
                     api_key=api_key,
+                    runtime=ServiceRegistry.get_agent_runtime(),
                 )
                 summary_service = service.llm_service
                 agent_reply = service.generate_reply(
@@ -287,6 +311,8 @@ def generate_reply(
             run.completed_at = datetime.now()
             session.add(run)
             session.commit()
+            if isinstance(exc, ChatBusyError):
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
             raise
     else:
         service = AgentChat(
@@ -308,16 +334,15 @@ def generate_reply(
     session.refresh(assistant_message)
 
     updated_history = [*history, assistant_message]
-    try:
-        chat.summary = summary_service.summarize_chat(
-            updated_history,
-            current_summary=chat.summary,
+    if len(updated_history) >= UNSUMMARIZED_MESSAGE_LIMIT and assistant_message.id is not None:
+        background_tasks.add_task(
+            _summarize_chat_background,
+            chat_id=chat_id,
+            messages=updated_history,
+            service=summary_service,
+            base_summary=chat.summary,
+            target_message_id=assistant_message.id,
         )
-        session.add(chat)
-        session.commit()
-    except Exception:
-        # Summary is a best-effort optimization — never block the response.
-        session.rollback()
 
     return ChatReplyResponse(
         user_message=_to_message_read(user_message),

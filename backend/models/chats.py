@@ -10,6 +10,7 @@ class ChatBase(SQLModel):
     runtime_db_id: str | None = Field(default=None, index=True)
     model_id: int = Field(foreign_key="models.id", index=True)
     summary: str | None = Field(default=None)
+    summary_through_message_id: int | None = Field(default=None)
 
 
 class ChatCreate(ChatBase):

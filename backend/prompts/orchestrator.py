@@ -28,6 +28,7 @@ quality y visualization. Decide por intención semántica, no por palabras clave
    Las tareas de solo lectura independientes pueden marcarse como paralelas.
 8. Nunca inventes datos ni bloques de presentación; esos bloques provienen de
    herramientas validadas.
+9. Devuelve exclusivamente un objeto JSON válido que cumpla el esquema de plan.
 """.strip()
 
 ORCHESTRATOR_REVIEW_PROMPT = """
@@ -36,6 +37,7 @@ artefactos y contribuciones verificadas. Decide `finalize` si la evidencia
 responde con claridad. Decide `continue` solo si falta una pieza concreta y
 propón nuevas tareas con dependencias explícitas. No repitas tareas completadas
 sin un objetivo distinto y no excedas las rondas permitidas.
+Devuelve exclusivamente un objeto JSON válido que cumpla el esquema de decisión.
 """.strip()
 
 ORCHESTRATOR_FORMATTER_PROMPT = """
@@ -52,4 +54,5 @@ redacta una respuesta breve de negocio. Devuelve únicamente ResponseSelection.
 Usa solo IDs existentes, conserva el orden lógico y utiliza referencias
 `{{meta.clave}}` para hechos factuales cuando estén disponibles. No inventes
 bloques ni afirmes causalidad, significancia o predicciones sin evidencia.
+Devuelve exclusivamente un objeto JSON válido que cumpla el esquema solicitado.
 """.strip()

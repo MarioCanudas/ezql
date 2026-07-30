@@ -12,17 +12,10 @@ from backend.services.agent.agent_chat import (
     LLMConfigurationError,
 )
 from backend.services.user_database import UserDatabase, RuntimeDatabaseError
-from backend.services.agent.graph import create_agent_graph
 from backend.services.agent.state import AgentState
-from backend.services.agent.nodes.orchestrator import OrchestratorNode
-from backend.services.agent.nodes.sql import SqlNode
-from backend.services.agent.nodes.statistics import StatisticsNode
-from backend.services.agent.nodes.visualization import VisualizationNode
-from backend.services.agent.nodes.statistics_grant import StatisticsGrantNode
-from backend.services.agent.nodes.quality import QualityNode
 from backend.services.agent.statistics_grants import StatisticsGrantStore
 from backend.services.agent.checkpoint import AgentCheckpointStore, get_checkpoint_store
-from backend.services.agent.runtime import ExecutionArtifactStore
+from backend.services.agent.runtime import AgentRuntime, ExecutionArtifactStore
 
 
 class AnalystAgent:
@@ -36,6 +29,7 @@ class AnalystAgent:
         temperature: float = 0.0,
         reasoning_effort: str | None = None,
         checkpoint_store: AgentCheckpointStore | None = None,
+        runtime: AgentRuntime | None = None,
     ) -> None:
         if not api_key or not api_key.strip():
             raise LLMConfigurationError("The API key is required and cannot be empty.")
@@ -48,25 +42,11 @@ class AnalystAgent:
             temperature=temperature,
             reasoning_effort=reasoning_effort,
         )
-
-        self.orchestrator_node = OrchestratorNode()
-        self.sql_node = SqlNode()
-        self.statistics_node = StatisticsNode()
-        self.statistics_grant_node = StatisticsGrantNode()
-        self.visualization_node = VisualizationNode()
-        self.quality_node = QualityNode()
         self.statistics_grants = StatisticsGrantStore()
         self.checkpoint_store = checkpoint_store or get_checkpoint_store()
-
-        self.graph = create_agent_graph(
-            self.orchestrator_node,
-            self.sql_node,
-            self.statistics_node,
-            self.statistics_grant_node,
-            self.visualization_node,
-            self.quality_node,
-            checkpointer=self.checkpoint_store.saver,
-        )
+        self.runtime = runtime or AgentRuntime(self.checkpoint_store)
+        self.llm_service = self.llm_service.with_http_client(self.runtime.http_client)
+        self.graph = self.runtime.graph
 
     def generate_reply(
         self,

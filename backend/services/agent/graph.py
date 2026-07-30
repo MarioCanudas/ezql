@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import Send
 
 from backend.services.agent.nodes.artifacts import ArtifactCollectorNode
-from backend.services.agent.nodes.base import NodeBase
+from backend.services.agent.nodes.base import NodeBase, SpecialistNodeBase
 from backend.services.agent.nodes.statistics_grant import StatisticsGrantNode
 from backend.services.agent.state import (
     AgentState,
@@ -18,20 +18,6 @@ from backend.services.agent.state import (
     ToolArtifact,
     SpecialistContribution,
 )
-from backend.services.agent.tools import (
-    quality_tools,
-    sql_tools,
-    statistics_tools,
-    visualization_tools,
-)
-
-
-def route_tool_calls(state: Any) -> str:
-    """Compatibility router for direct specialist-node tests."""
-
-    if not getattr(state, "messages", None):
-        return "next"
-    return "tools" if getattr(state.messages[-1], "tool_calls", []) else "next"
 
 
 def _result_by_task(state: AgentState) -> dict[str, TaskResult]:
@@ -76,13 +62,9 @@ def route_after_orchestrator(state: AgentState) -> str:
         return "end"
     if state.tasks:
         return "dispatch" if ready_tasks(state) else "orchestrator"
-
-    # Backwards-compatible route for callers still constructing the old queue.
     pending_steps = getattr(state, "pending_steps", [])
     if pending_steps:
-        if pending_steps[0].specialist == "statistics":
-            return "authorize_statistics"
-        return pending_steps[0].specialist
+        return "authorize_statistics" if pending_steps[0].specialist == "statistics" else pending_steps[0].specialist
     return "orchestrator"
 
 
@@ -100,8 +82,7 @@ def _local_tool_route(state: SpecialistState) -> str:
 
 
 def _compile_specialist_graph(
-    specialist: NodeBase,
-    tools: list[Any],
+    specialist: SpecialistNodeBase,
     *,
     grant_node: StatisticsGrantNode | None = None,
 ):
@@ -113,7 +94,7 @@ def _compile_specialist_graph(
 
     workflow = StateGraph(SpecialistState)
     workflow.add_node("specialist", specialist)
-    workflow.add_node("tools", ToolNode(tools))
+    workflow.add_node("tools", ToolNode(specialist.tools))
     workflow.add_node("collect", ArtifactCollectorNode())
     if grant_node is not None:
         workflow.add_node("authorize", grant_node)
@@ -163,11 +144,11 @@ def _subgraph_result(
 
 def create_agent_graph(
     orchestrator_node: NodeBase,
-    sql_node: NodeBase,
-    statistics_node: NodeBase,
+    sql_node: SpecialistNodeBase,
+    statistics_node: SpecialistNodeBase,
     statistics_grant_node: StatisticsGrantNode,
-    visualization_node: NodeBase,
-    quality_node: NodeBase | None = None,
+    visualization_node: SpecialistNodeBase,
+    quality_node: SpecialistNodeBase | None = None,
     *,
     checkpointer: Any | None = None,
 ):
@@ -175,12 +156,12 @@ def create_agent_graph(
 
     quality_node = quality_node or sql_node
     specialist_graphs = {
-        "sql": _compile_specialist_graph(sql_node, sql_tools),
+        "sql": _compile_specialist_graph(sql_node),
         "statistics": _compile_specialist_graph(
-            statistics_node, statistics_tools, grant_node=statistics_grant_node
+            statistics_node, grant_node=statistics_grant_node
         ),
-        "quality": _compile_specialist_graph(quality_node, quality_tools),
-        "visualization": _compile_specialist_graph(visualization_node, visualization_tools),
+        "quality": _compile_specialist_graph(quality_node),
+        "visualization": _compile_specialist_graph(visualization_node),
     }
 
     def task_worker(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -215,21 +196,6 @@ def create_agent_graph(
     workflow.add_node("orchestrator", orchestrator_node)
     workflow.add_node("dispatch", lambda state, config: {})
     workflow.add_node("task_worker", task_worker)
-    # Stable node names retained for graph introspection and older integrations.
-    # Runtime dispatch uses the task_worker and specialist subgraphs above.
-    workflow.add_node("sql", sql_node)
-    workflow.add_node("statistics", statistics_node)
-    workflow.add_node("authorize_statistics", statistics_grant_node)
-    workflow.add_node("visualization", visualization_node)
-    workflow.add_node("quality", quality_node)
-    workflow.add_node("tools_sql", ToolNode(sql_tools))
-    workflow.add_node("tools_statistics", ToolNode(statistics_tools))
-    workflow.add_node("tools_visualization", ToolNode(visualization_tools))
-    workflow.add_node("tools_quality", ToolNode(quality_tools))
-    workflow.add_node("collect_sql", ArtifactCollectorNode())
-    workflow.add_node("collect_statistics", ArtifactCollectorNode())
-    workflow.add_node("collect_visualization", ArtifactCollectorNode())
-    workflow.add_node("collect_quality", ArtifactCollectorNode())
     workflow.add_edge(START, "orchestrator")
     workflow.add_conditional_edges(
         "orchestrator",
@@ -237,11 +203,6 @@ def create_agent_graph(
         {
             "dispatch": "dispatch",
             "orchestrator": "orchestrator",
-            # Compatibility routes for direct old queue states.
-            "sql": "task_worker",
-            "statistics": "task_worker",
-            "authorize_statistics": "task_worker",
-            "visualization": "task_worker",
             "end": END,
         },
     )
@@ -250,3 +211,10 @@ def create_agent_graph(
     )
     workflow.add_edge("task_worker", "orchestrator")
     return workflow.compile(checkpointer=checkpointer)
+
+
+def route_tool_calls(state: Any) -> str:
+    """Compatibility helper; production routing is internal to specialist subgraphs."""
+    if not getattr(state, "messages", None):
+        return "next"
+    return "tools" if getattr(state.messages[-1], "tool_calls", []) else "next"

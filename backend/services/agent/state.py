@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.models.blocks import UIBlock
 from backend.models.metadata import MessageMetadata
@@ -91,54 +91,24 @@ class AgentTask(BaseModel):
 
 # Compatibility name retained for integrations that imported PlanStep directly.
 # New code should use AgentTask and dependencies rather than a positional queue.
-class PlanStep(AgentTask):
-    id: str = ""
-
-
 class ExecutionPlan(BaseModel):
     """DAG proposed by the planner for one investigation round."""
 
     tasks: list[AgentTask] = Field(default_factory=list, max_length=8)
 
-    @model_validator(mode="before")
-    @classmethod
-    def accept_legacy_steps(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "tasks" not in value and "steps" in value:
-            value = dict(value)
-            value["tasks"] = value.pop("steps")
-        return value
-
-    @property
-    def steps(self) -> list[AgentTask]:
-        """Compatibility view for older planner responses."""
-
-        return self.tasks
-
-
-class InvestigationDecision(BaseModel):
-    action: Literal["continue", "finalize"]
-    reason: str
+class OrchestrationDecision(BaseModel):
+    action: Literal["continue", "finalize"] = "finalize"
+    reason: str = ""
     tasks: list[AgentTask] = Field(default_factory=list, max_length=8)
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_legacy_steps(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "tasks" not in value and "steps" in value:
-            value = dict(value)
-            value["tasks"] = value.pop("steps")
-        return value
-
-    @property
-    def steps(self) -> list[AgentTask]:
-        return self.tasks
-
-
-class ResponseSelection(BaseModel):
-    """LLM-selected, evidence-backed composition of a final response."""
-
-    summary: str
+    summary: str = ""
     narrative: str = ""
     candidate_ids: list[str] = Field(default_factory=list)
+
+
+# Temporary import aliases for external integrations. Production routing uses AgentTask.
+PlanStep = AgentTask
+InvestigationDecision = OrchestrationDecision
+ResponseSelection = OrchestrationDecision
 
 
 class SpecialistContribution(BaseModel):
@@ -202,8 +172,5 @@ class AgentState(BaseModel):
     processed_tool_call_ids: Annotated[list[str], append_data] = Field(default_factory=list)
     active_task: AgentTask | None = None
     response: dict[str, Any] | None = None
-
-    # Deprecated queue fields retained as a migration bridge for callers that
-    # construct AgentState directly. The graph never writes them.
-    pending_steps: list[PlanStep] = Field(default_factory=list)
-    completed_steps: Annotated[list[PlanStep], append_data] = Field(default_factory=list)
+    pending_steps: list[AgentTask] = Field(default_factory=list, exclude=True)
+    completed_steps: Annotated[list[AgentTask], append_data] = Field(default_factory=list, exclude=True)

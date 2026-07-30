@@ -91,14 +91,14 @@ class SpecialistNodeBase(NodeBase):
         get_value = state.get if isinstance(state, dict) else lambda key, default=None: getattr(state, key, default)
         active_task = get_value("task")
         if active_task is None:
-            pending_steps = get_value("pending_steps", [])
-            active_task = pending_steps[0] if pending_steps else None
+            tasks = get_value("tasks", []) or []
+            active_task = tasks[0] if tasks else None
         if active_task is None:
             return {}
         if active_task.specialist != self.step:
             return {}
 
-        llm = agent_config.llm_service._build_client()
+        llm = agent_config.llm_service
         state_messages = get_value("messages", []) or []
         messages = [
             SystemMessage(content=self.system_prompt),
@@ -126,9 +126,7 @@ class SpecialistNodeBase(NodeBase):
         # parallelism is handled by the parent graph with Send.
         bound_llm = llm.bind_tools(self.tools, parallel_tool_calls=False)
         try:
-            response = bound_llm.invoke(
-                messages, config={"configurable": config.get("configurable", {})}
-            )
+            response = bound_llm.invoke(messages, config={"configurable": config.get("configurable", {})})
             if (
                 self.require_initial_tool_call
                 and not has_tool_attempt
@@ -156,46 +154,16 @@ class SpecialistNodeBase(NodeBase):
 
         state_artifacts = get_value("artifacts", []) or []
         available_metadata = state_metadata(state_artifacts)
-        contribution_prompt = messages + [response, SystemMessage(content="""
-Convierte los hallazgos verificados en piezas de presentación reutilizables.
-Propón solo narrativa MarkdownBlock; las métricas, tablas y gráficas provienen
-de candidatos validados por herramientas.
-No crees tipos especializados para tendencias, anomalías o metodología.
-Describe tendencias, anomalías, advertencias y recomendaciones en Markdown.
-Nunca afirmes que EzQL no puede generar gráficas: una limitación solo se comunica
-si una herramienta devolvió un fallo verificable para esta solicitud concreta.
-Para cifras, porcentajes, importes y fechas factuales que cites en la narrativa,
-prefiere referencias con la forma {{meta.clave}} de la metadata verificada
-disponible. El texto explicativo normal sigue siendo válido.
-""".strip())]
-        contribution_prompt.append(
-            SystemMessage(content="[METADATA_VERIFICADA]\n" + str(sorted(available_metadata)))
-        )
         artifact_ids = [artifact.tool_call_id for artifact in state_artifacts if artifact.ok]
-        try:
-            contribution = llm.with_structured_output(
-                SpecialistContribution, method="json_schema"
-            ).invoke(
-                contribution_prompt,
-                config={"configurable": config.get("configurable", {})},
-            )
-            contribution = SpecialistContribution.model_validate(contribution)
-            contribution.task_id = active_task.id
-            contribution.step_id = active_task.id
-            contribution.specialist = self.step
-            contribution.artifact_ids = [
-                artifact_id for artifact_id in contribution.artifact_ids if artifact_id in artifact_ids
-            ]
-        except Exception:
-            narrative = str(response.content).strip() or "Análisis completado."
-            contribution = SpecialistContribution(
-                task_id=active_task.id,
-                step_id=active_task.id,
-                specialist=self.step,
-                summary=narrative,
-                artifact_ids=artifact_ids,
-                blocks=[MarkdownBlock(content=narrative)],
-            )
+        narrative = str(response.content).strip() or "Análisis completado."
+        contribution = SpecialistContribution(
+            task_id=active_task.id,
+            step_id=active_task.id,
+            specialist=self.step,
+            summary=narrative,
+            artifact_ids=artifact_ids,
+            blocks=[MarkdownBlock(content=narrative)],
+        )
 
         contribution.blocks = [
             sanitize_generated_block(block, available_metadata)
