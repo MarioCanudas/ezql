@@ -116,19 +116,6 @@ class TestAgentGraph:
         )
         node_names = set(graph.nodes.keys())
 
-        expected = {
-            "__start__",
-            "orchestrator",
-            "sql",
-            "statistics",
-            "authorize_statistics",
-            "visualization",
-            "tools_sql",
-            "tools_statistics",
-            "tools_visualization",
-            "collect_sql",
-            "collect_statistics",
-            "collect_visualization",
-        }
+        expected = {"__start__", "orchestrator", "dispatch", "task_worker"}
         # All expected nodes must be present
         assert expected.issubset(node_names), f"Missing nodes: {expected - node_names}"
