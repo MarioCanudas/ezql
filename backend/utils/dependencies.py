@@ -2,6 +2,8 @@ from sqlmodel import Session
 
 from backend.services.user_database import UserDatabase
 from backend.services.db_connection import DBConnection
+from backend.services.agent.checkpoint import get_checkpoint_store
+from backend.services.agent.runtime import AgentRuntime
 
 
 class ServiceRegistry:
@@ -11,6 +13,7 @@ class ServiceRegistry:
     """
     _user_database: UserDatabase | None = None
     _db_connection: DBConnection | None = None
+    _agent_runtime: AgentRuntime | None = None
 
     @classmethod
     def get_user_database(cls) -> UserDatabase:
@@ -23,6 +26,12 @@ class ServiceRegistry:
         if cls._db_connection is None:
             cls._db_connection = DBConnection()
         return cls._db_connection
+
+    @classmethod
+    def get_agent_runtime(cls) -> AgentRuntime:
+        if cls._agent_runtime is None:
+            cls._agent_runtime = AgentRuntime(get_checkpoint_store())
+        return cls._agent_runtime
     
     @classmethod
     def clear(cls):
@@ -33,6 +42,9 @@ class ServiceRegistry:
         if cls._db_connection:
             cls._db_connection.disconnect()
             cls._db_connection = None
+        if cls._agent_runtime:
+            cls._agent_runtime.close()
+            cls._agent_runtime = None
 
 
 def get_session():

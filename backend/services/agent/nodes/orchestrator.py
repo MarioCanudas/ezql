@@ -14,7 +14,6 @@ from backend.prompts.orchestrator import (
     ORCHESTRATOR_FORMATTER_PROMPT,
     ORCHESTRATOR_PLANNER_PROMPT,
     ORCHESTRATOR_REVIEW_PROMPT,
-    ORCHESTRATOR_SELECTION_PROMPT,
 )
 from backend.services.agent.agent_chat import LLMGenerationError
 from backend.services.agent.metadata import (
@@ -29,10 +28,8 @@ from backend.services.agent.state import (
     AgentState,
     AgentTask,
     ExecutionPlan,
-    InvestigationDecision,
-    PlanStep,
+    OrchestrationDecision,
     PresentationCandidate,
-    ResponseSelection,
     TaskResult,
 )
 
@@ -40,10 +37,15 @@ MAX_REPLANS = 2
 logger = logging.getLogger(__name__)
 VISUALIZATION_KEYWORDS = ("gráfica", "grafica", "chart", "graficar", "visualizar", "visualización", "visualizacion", "dashboard")
 STATISTICS_KEYWORDS = (
-    "anomal", "atípic", "outlier", "tendencia", "evolución", "crecimiento",
+    "estadístic", "estadistic", "anomal", "atípic", "outlier", "tendencia", "evolución", "crecimiento",
     "caída", "caida", "promedio", "media", "mediana", "percentil", "desviación",
     "distribución", "variabilidad", "nulo", "faltante", "calidad de datos",
     "ranking", "participación", "participacion", "segmento", "compar", "kpi",
+)
+QUALITY_KEYWORDS = (
+    "calidad de datos", "complet", "valor faltante", "valores faltantes",
+    "campo vacío", "campos vacíos", "nulo", "nulos", "duplicado", "duplicados",
+    "consistencia", "cobertura",
 )
 
 
@@ -86,6 +88,24 @@ def _normalize_tasks(
         )
         completed_keys.add(key)
     return normalized
+
+
+def _required_tasks_for_request(
+    tasks: list[AgentTask], messages: list[Any]
+) -> list[AgentTask]:
+    """Guarantee specialists explicitly requested by the user reach the graph.
+
+    The planner remains responsible for the detailed DAG. This small deterministic
+    repair only prevents a provider or structured-output fallback from silently
+    turning an explicit visualization/statistics request into a SQL-only answer.
+    """
+
+    return _enforce_quality_step(
+        _enforce_statistics_step(
+            _enforce_visualization_step(tasks, messages), messages
+        ),
+        messages,
+    )
 
 
 def validate_task_plan(tasks: list[AgentTask]) -> list[AgentTask]:
@@ -175,18 +195,6 @@ def validate_task_plan(tasks: list[AgentTask]) -> list[AgentTask]:
     return [task for task in sanitized if task.id not in cyclic]
 
 
-def _legacy_pending_tasks(state: AgentState) -> list[AgentTask]:
-    return [
-        AgentTask(
-            id=step.id or f"legacy-{index}-{step.specialist}",
-            specialist=step.specialist,
-            objective=step.objective,
-            requires_grant=step.specialist == "statistics",
-        )
-        for index, step in enumerate(getattr(state, "pending_steps", []), start=1)
-    ]
-
-
 def _apply_task_results(state: AgentState) -> list[AgentTask]:
     tasks = [task.model_copy() for task in state.tasks]
     by_id = {task.id: task for task in tasks}
@@ -269,7 +277,7 @@ def _invoke_structured(
 
 def _fallback_selection(
     state: AgentState, candidates: list[PresentationCandidate]
-) -> ResponseSelection:
+) -> OrchestrationDecision:
     narrative = next(
         (
             contribution.summary.strip()
@@ -283,7 +291,9 @@ def _fallback_selection(
             (artifact.summary.strip() for artifact in reversed(state.artifacts) if artifact.summary.strip()),
             "",
         )
-    return ResponseSelection(
+    return OrchestrationDecision(
+        action="finalize",
+        reason="Fallback de evidencia verificada.",
         summary="Encontré resultados verificados para tu consulta.",
         narrative=narrative,
         candidate_ids=[candidate.id for candidate in candidates],
@@ -295,7 +305,7 @@ def _references(text: str) -> set[str]:
 
 
 def _selected_presentation(
-    candidates: list[PresentationCandidate], selection: ResponseSelection, metadata: dict[str, Any]
+    candidates: list[PresentationCandidate], selection: OrchestrationDecision, metadata: dict[str, Any]
 ) -> tuple[list[UIBlock], dict[str, Any]]:
     by_id = {candidate.id: candidate for candidate in candidates}
     selected: list[PresentationCandidate] = []
@@ -355,18 +365,16 @@ class OrchestratorNode(NodeBase):
         agent_config.database_service.get_database(
             agent_config.runtime_db_id, user_id=agent_config.user_id
         )
-        llm = agent_config.llm_service._build_client()
+        llm = agent_config.llm_service
         messages = _messages(state, config)
-        current_tasks = state.tasks or _legacy_pending_tasks(state)
+        current_tasks = state.tasks
 
         if not state.planning_started:
             try:
-                plan = _invoke_structured(
-                    llm,
+                plan = llm.invoke_structured(
                     ExecutionPlan,
                     [SystemMessage(content=ORCHESTRATOR_PLANNER_PROMPT)] + messages,
-                    {"configurable": config.get("configurable", {})},
-                    "planner",
+                    config={"configurable": config.get("configurable", {})}, label="planner",
                 )
                 plan = ExecutionPlan.model_validate(plan)
             except Exception as exc:
@@ -378,7 +386,10 @@ class OrchestratorNode(NodeBase):
                         objective="Descubrir los datos necesarios.",
                     )]
                 )
-            tasks = validate_task_plan(_normalize_tasks(plan.tasks, round_number=1, completed=[]))
+            requested_tasks = _required_tasks_for_request(plan.tasks, messages)
+            tasks = validate_task_plan(
+                _normalize_tasks(requested_tasks, round_number=1, completed=[])
+            )
             if not tasks:
                 tasks = [
                     AgentTask(
@@ -391,12 +402,9 @@ class OrchestratorNode(NodeBase):
                 "planning_started": True,
                 "plan_round": 1,
                 "tasks": tasks,
-                "pending_steps": [PlanStep(**task.model_dump()) for task in tasks],
             }
 
-        if current_tasks and not state.tasks:
-            current_tasks = _apply_task_results(state.model_copy(update={"tasks": current_tasks}))
-        elif state.tasks and state.task_results:
+        if state.tasks and state.task_results:
             current_tasks = _apply_task_results(state)
 
         if current_tasks and any(task.status in {"pending", "ready"} for task in current_tasks):
@@ -405,22 +413,20 @@ class OrchestratorNode(NodeBase):
         reviewable = bool(current_tasks) or (not state.tasks and not state.task_results)
         if state.replan_count < MAX_REPLANS and reviewable:
             review_messages = [
-                SystemMessage(content=ORCHESTRATOR_REVIEW_PROMPT),
+                SystemMessage(content=ORCHESTRATOR_REVIEW_PROMPT + "\nSi finalizas, también redacta summary, narrative y candidate_ids."),
                 *messages,
-                HumanMessage(content="[EVIDENCIA_ACUMULADA]\n" + _evidence(state)),
+                HumanMessage(content="[EVIDENCIA_ACUMULADA]\n" + _evidence(state) + "\n[CATALOGO_DE_EVIDENCIA]\n" + _candidate_evidence(state_candidates(state.artifacts), state_metadata(state.artifacts))),
             ]
             try:
-                decision = _invoke_structured(
-                    llm,
-                    InvestigationDecision,
+                decision = llm.invoke_structured(
+                    OrchestrationDecision,
                     review_messages,
-                    {"configurable": config.get("configurable", {})},
-                    "review",
+                    config={"configurable": config.get("configurable", {})}, label="review",
                 )
-                decision = InvestigationDecision.model_validate(decision)
+                decision = OrchestrationDecision.model_validate(decision)
             except Exception as exc:
                 logger.exception("Evidence review failed; finalizing safe evidence: %s", exc)
-                decision = InvestigationDecision(action="finalize", reason="La evidencia es suficiente.")
+                decision = _fallback_selection(state, state_candidates(state.artifacts))
             if decision.action == "continue":
                 next_round = state.plan_round + 1
                 next_tasks = validate_task_plan(_normalize_tasks(
@@ -433,37 +439,26 @@ class OrchestratorNode(NodeBase):
                         "replan_count": state.replan_count + 1,
                         "plan_round": next_round,
                         "tasks": next_tasks,
-                        "pending_steps": [PlanStep(**task.model_dump()) for task in next_tasks],
                     }
-
         metadata = state_metadata(state.artifacts)
         candidates = state_candidates(state.artifacts)
-        if candidates:
-            selection_messages = [
-                SystemMessage(content=ORCHESTRATOR_SELECTION_PROMPT),
-                *messages,
-                HumanMessage(
-                    content="[CATALOGO_DE_EVIDENCIA]\n" + _candidate_evidence(candidates, metadata)
-                ),
-            ]
-            selection_failed = False
+        selected_decision = locals().get("decision")
+        if not isinstance(selected_decision, OrchestrationDecision):
             try:
-                selection = _invoke_structured(
-                    llm,
-                    ResponseSelection,
-                    selection_messages,
-                    {"configurable": config.get("configurable", {})},
-                    "selection",
+                selected_decision = OrchestrationDecision.model_validate(
+                    llm.invoke_structured(
+                        OrchestrationDecision,
+                        [SystemMessage(content=ORCHESTRATOR_REVIEW_PROMPT), *messages,
+                         HumanMessage(content="[CATALOGO_DE_EVIDENCIA]\n" + _candidate_evidence(candidates, metadata))],
+                        config={"configurable": config.get("configurable", {})}, label="finalize",
+                    )
                 )
-                selection = ResponseSelection.model_validate(selection)
-            except Exception as exc:
-                selection_failed = True
-                logger.exception("Evidence selection failed; using verified fallback: %s", exc)
-                selection = _fallback_selection(state, candidates)
-            if not selection.summary.strip() or selection.summary.strip() == "Resultados verificados disponibles.":
+            except Exception:
+                selected_decision = _fallback_selection(state, candidates)
+        selection = selected_decision if isinstance(selected_decision, OrchestrationDecision) and selected_decision.action == "finalize" else _fallback_selection(state, candidates)
+        if candidates:
+            if not selection.summary.strip():
                 selection.summary = _fallback_selection(state, candidates).summary
-            if selection_failed and not selection.narrative.strip():
-                selection.narrative = _fallback_selection(state, candidates).narrative
             blocks, selected_metadata = _selected_presentation(candidates, selection, metadata)
             summary = safe_template(selection.summary, selected_metadata)
             narrative = safe_template(selection.narrative, selected_metadata)
@@ -484,18 +479,9 @@ class OrchestratorNode(NodeBase):
             HumanMessage(content="[EVIDENCIA_Y_PIEZAS]\n" + _evidence(state)),
         ]
         try:
-            response = llm.with_structured_output(AgentResponse, method="json_schema").invoke(
-                formatter_messages,
-                config={"configurable": config.get("configurable", {})},
-            )
-        except Exception:
-            try:
-                response = llm.with_structured_output(AgentResponse, method="json_mode").invoke(
-                    formatter_messages,
-                    config={"configurable": config.get("configurable", {})},
-                )
-            except Exception as exc:
-                raise LLMGenerationError("No se pudo preparar una respuesta para el usuario.") from exc
+            response = llm.invoke_structured(AgentResponse, formatter_messages, config={"configurable": config.get("configurable", {})}, label="formatter")
+        except Exception as exc:
+            raise LLMGenerationError("No se pudo preparar una respuesta para el usuario.") from exc
 
         response = AgentResponse.model_validate(response)
         response.metadata = metadata
@@ -515,41 +501,44 @@ class OrchestratorNode(NodeBase):
         return {"response": validated.model_dump(), "messages": [AIMessage(content=validated.summary)]}
 
 
-# Deprecated helpers kept for callers that imported the previous keyword guards.
-# They are no longer used by the planner or graph routing.
-def _enforce_visualization_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
-    text = ""
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            text = str(message.content).casefold()
-            break
+def _enforce_visualization_step(steps: list[AgentTask], messages: list[Any]) -> list[AgentTask]:
+    text = next((str(message.content).casefold() for message in reversed(messages) if isinstance(message, HumanMessage)), "")
     if not any(keyword in text for keyword in VISUALIZATION_KEYWORDS):
         return steps
     enriched = list(steps)
     specialists = {step.specialist for step in enriched}
     if "sql" not in specialists:
-        enriched.insert(0, PlanStep(specialist="sql", objective="Preparar y validar los datos para la visualización solicitada."))
+        enriched.insert(0, AgentTask(specialist="sql", objective="Preparar y validar los datos para la visualización solicitada."))
     if "visualization" not in specialists:
-        enriched.append(PlanStep(specialist="visualization", objective="Crear la gráfica solicitada con los datos validados."))
+        enriched.append(AgentTask(specialist="visualization", objective="Crear la gráfica solicitada con los datos validados."))
     return enriched
 
 
-def _enforce_statistics_step(steps: list[PlanStep], messages: list[Any]) -> list[PlanStep]:
-    text = ""
-    for message in reversed(messages):
-        if isinstance(message, HumanMessage):
-            text = str(message.content).casefold()
-            break
+def _enforce_statistics_step(steps: list[AgentTask], messages: list[Any]) -> list[AgentTask]:
+    text = next((str(message.content).casefold() for message in reversed(messages) if isinstance(message, HumanMessage)), "")
     if not any(keyword in text for keyword in STATISTICS_KEYWORDS):
         return steps
     enriched = list(steps)
     specialists = {step.specialist for step in enriched}
     if "sql" not in specialists:
-        enriched.insert(0, PlanStep(specialist="sql", objective="Identificar y validar los datos necesarios para el análisis estadístico."))
+        enriched.insert(0, AgentTask(specialist="sql", objective="Identificar y validar los datos necesarios para el análisis estadístico."))
     if "statistics" not in specialists:
-        index = next(
-            (index for index, step in enumerate(enriched) if step.specialist == "visualization"),
-            len(enriched),
-        )
-        enriched.insert(index, PlanStep(specialist="statistics", objective="Calcular las métricas y hallazgos estadísticos solicitados con evidencia verificable."))
+        index = next((i for i, step in enumerate(enriched) if step.specialist == "visualization"), len(enriched))
+        enriched.insert(index, AgentTask(specialist="statistics", objective="Calcular las métricas y hallazgos estadísticos solicitados con evidencia verificable."))
     return enriched
+
+
+def _enforce_quality_step(steps: list[AgentTask], messages: list[Any]) -> list[AgentTask]:
+    """Ensure data-quality questions cannot silently bypass the quality node."""
+    text = next((str(message.content).casefold() for message in reversed(messages) if isinstance(message, HumanMessage)), "")
+    if not any(keyword in text for keyword in QUALITY_KEYWORDS):
+        return steps
+    if any(step.specialist == "quality" for step in steps):
+        return steps
+    return [
+        *steps,
+        AgentTask(
+            specialist="quality",
+            objective="Evaluar completitud, valores faltantes y consistencia de los datos solicitados.",
+        ),
+    ]

@@ -25,6 +25,7 @@ async def lifespan(app: FastAPI):
         print("Connecting to the database...")
         ServiceRegistry.get_db_connection().connect()
         ServiceRegistry.get_user_database()  # Initialize the registry instance
+        ServiceRegistry.get_agent_runtime()
         print("Database connection established.")
         yield
     except Exception as e:

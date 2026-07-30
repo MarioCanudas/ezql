@@ -1,7 +1,10 @@
 """Tests for the AgentChat service and provider resolution."""
 
+from unittest.mock import patch
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel
 
 from backend.models import Content, Messages, Role
 from backend.services.agent.agent_chat import AgentChat, resolve_llm_provider
@@ -87,6 +90,42 @@ class TestAgentChatValidation:
         )
         client = chat._build_client()
         assert getattr(client, "reasoning_effort", None) == "high"
+
+
+class TestStructuredOutputFallback:
+    def test_json_mode_fallback_injects_required_json_instruction(self):
+        class ResultSchema(BaseModel):
+            value: str
+
+        class StructuredResult:
+            def __init__(self, method: str):
+                self.method = method
+
+            def invoke(self, messages, config=None):
+                if self.method == "json_schema":
+                    raise RuntimeError("json_schema unsupported")
+                assert isinstance(messages[-1], SystemMessage)
+                assert "json" in str(messages[-1].content).casefold()
+                return ResultSchema(value="ok")
+
+        class ProviderClient:
+            def with_structured_output(self, schema, method="json_schema"):
+                assert schema is ResultSchema
+                return StructuredResult(method)
+
+        chat = AgentChat(model_name="gpt-4o-mini", provider="openai", api_key="sk-test")
+        with patch(
+            "backend.services.agent.agent_chat.AgentChat._build_client",
+            return_value=ProviderClient(),
+        ):
+            result = chat.invoke_structured(
+                ResultSchema,
+                [SystemMessage(content="Devuelve un resultado estructurado.")],
+                config={},
+                label="test",
+            )
+
+        assert result == ResultSchema(value="ok")
 
 
 # ---------------------------------------------------------------------------

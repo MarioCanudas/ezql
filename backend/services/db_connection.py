@@ -1,7 +1,8 @@
+import os
 from typing import Optional
 
 from pydantic import BaseModel
-from sqlalchemy import Engine, Inspector, inspect, text
+from sqlalchemy import Engine, event, Inspector, inspect, text
 from sqlmodel import Session, SQLModel, Table, create_engine, select
 
 # Import tables to register them with SQLModel metadata
@@ -32,7 +33,11 @@ class DBConnection:
     def connect(self) -> None:
         """Initializes the database engine and validates the schema."""
         if self.engine is None:
-            self.engine = create_engine(DB_URL, echo=True)
+            self.engine = create_engine(DB_URL, echo=os.getenv("EZQL_SQL_ECHO") == "1")
+            @event.listens_for(self.engine, "connect")
+            def configure_sqlite(connection, _) -> None:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("PRAGMA busy_timeout=5000")
             SQLModel.metadata.create_all(self.engine)
             self._migrate_known_columns()
             self._seed_supported_records()
@@ -84,6 +89,15 @@ class DBConnection:
                 connection.execute(
                     text("ALTER TABLE chats ADD COLUMN runtime_db_id VARCHAR")
                 )
+            if "summary_through_message_id" not in chat_column_names:
+                connection.execute(text("ALTER TABLE chats ADD COLUMN summary_through_message_id INTEGER"))
+
+        if "agentruns" in table_names:
+            run_columns = {column["name"] for column in inspector.get_columns("agentruns")}
+            with self.engine.begin() as connection:
+                for name, sql_type in {"duration_ms": "INTEGER", "llm_call_count": "INTEGER NOT NULL DEFAULT 0", "tool_call_count": "INTEGER NOT NULL DEFAULT 0", "replan_count": "INTEGER NOT NULL DEFAULT 0"}.items():
+                    if name not in run_columns:
+                        connection.execute(text(f"ALTER TABLE agentruns ADD COLUMN {name} {sql_type}"))
 
         refreshed_columns = inspect(self.engine).get_columns("chats")
         db_id_column = next(

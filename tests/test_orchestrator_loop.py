@@ -60,8 +60,8 @@ def test_orchestrator_enqueues_a_complementary_plan(mock_build_client):
 
         assert result["replan_count"] == 1
         assert result["plan_round"] == 2
-        assert result["pending_steps"][0].specialist == "sql"
-        assert result["pending_steps"][0].objective == "Comparar categorías por período"
+        assert result["tasks"][0].specialist == "sql"
+        assert result["tasks"][0].objective == "Comparar categorías por período"
     finally:
         database.close()
 
@@ -151,6 +151,61 @@ def test_statistical_chart_orders_evidence_before_visualization():
     )
 
     assert [step.specialist for step in steps] == ["sql", "statistics", "visualization"]
+
+
+def test_quality_intent_cannot_be_planned_without_the_quality_specialist():
+    from backend.services.agent.nodes.orchestrator import _required_tasks_for_request
+
+    steps = _required_tasks_for_request(
+        [PlanStep(specialist="sql", objective="Inspeccionar tablas")],
+        [HumanMessage(content="¿Qué tan completos están los datos y qué columnas tienen valores faltantes?")],
+    )
+
+    assert {step.specialist for step in steps} >= {"sql", "quality"}
+
+
+@patch("backend.services.agent.agent_chat.AgentChat._build_client")
+def test_schema_fallback_keeps_explicit_statistics_and_visualization_requests(mock_build_client):
+    """A provider without json_schema must not degrade this request to SQL only."""
+    database = UserDatabase()
+    try:
+        runtime = database.register_sample_sqlite(user_id=1)
+
+        class StructuredResult:
+            def __init__(self, method: str):
+                self.method = method
+
+            def invoke(self, messages, config=None):
+                if self.method == "json_schema":
+                    raise RuntimeError("json_schema unsupported")
+                assert "json" in str(messages[-1].content).casefold()
+                return {
+                    "tasks": [
+                        {
+                            "specialist": "sql",
+                            "objective": "Resumir la base disponible.",
+                        }
+                    ]
+                }
+
+        class ProviderClient:
+            def with_structured_output(self, schema, method="json_schema"):
+                assert schema.__name__ == "ExecutionPlan"
+                return StructuredResult(method)
+
+        mock_build_client.return_value = ProviderClient()
+        result = OrchestratorNode()(
+            AgentState(messages=[HumanMessage(
+                content="Hazme un resumen de la base de datos con estadísticas y gráficas."
+            )]),
+            _config(database, runtime.id),
+        )
+
+        tasks = {task.specialist: task for task in result["tasks"]}
+        assert set(tasks) == {"sql", "statistics", "visualization"}
+        assert tasks["visualization"].depends_on == [tasks["sql"].id]
+    finally:
+        database.close()
 
 
 def test_artifact_catalog_keeps_only_presentable_facts_and_provenance():
@@ -287,7 +342,7 @@ def test_visualization_uses_compatible_tool_binding(mock_build_client):
         result = VisualizationNode()(
             AgentState(
                 messages=[HumanMessage(content="Muéstrame una gráfica")],
-                pending_steps=[PlanStep(specialist="visualization", objective="Crear gráfica")],
+                    tasks=[PlanStep(specialist="visualization", objective="Crear gráfica")],
             ),
             _config(database, runtime.id),
         )

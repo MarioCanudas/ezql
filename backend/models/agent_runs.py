@@ -18,6 +18,10 @@ class AgentRunBase(SQLModel):
     error_code: str | None = Field(default=None, max_length=100)
     started_at: datetime = Field(default_factory=datetime.now)
     completed_at: datetime | None = Field(default=None)
+    duration_ms: int | None = Field(default=None)
+    llm_call_count: int = Field(default=0)
+    tool_call_count: int = Field(default=0)
+    replan_count: int = Field(default=0)
 
 
 class AgentRuns(AgentRunBase, table=True):

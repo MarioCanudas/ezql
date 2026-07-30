@@ -10,7 +10,6 @@ from backend.models import (
     Content,
     MarkdownBlock,
     Messages,
-    MetricBlock,
     Role,
 )
 from backend.services.agent.agent import AnalystAgent
@@ -18,7 +17,6 @@ from backend.services.agent.state import (
     ExecutionPlan,
     InvestigationDecision,
     PlanStep,
-    SpecialistContribution,
 )
 from backend.services.user_database import UserDatabase
 from langchain_core.messages import AIMessage
@@ -74,24 +72,10 @@ class TestAnalystAgentIntegration:
                             "objective": "Contar los registros disponibles",
                         }]
                     }
-                if self.schema_name == "SpecialistContribution":
-                    return {
-                        "specialist": "sql",
-                        "summary": "La base contiene registros disponibles.",
-                        "blocks": [{
-                            "type": "markdown",
-                            "content": "El conteo fue verificado directamente en la base.",
-                        }],
-                    }
-                if self.schema_name == "InvestigationDecision":
+                if self.schema_name == "OrchestrationDecision":
                     return {
                         "action": "finalize",
                         "reason": "La evidencia responde la consulta.",
-                    }
-                if self.schema_name == "ResponseSelection":
-                    if self.method == "json_schema":
-                        raise RuntimeError("provider does not support json_schema")
-                    return {
                         "summary": "Encontré el conteo verificado de la base.",
                         "narrative": "El conteo fue verificado directamente en la base.",
                         "candidate_ids": ["call-real-count.block.0"],
@@ -142,7 +126,7 @@ class TestAnalystAgentIntegration:
         assert any(block.type == "markdown" for block in reply.blocks or [])
         assert any(block.type == "metric" for block in reply.blocks or [])
         assert "Structured planner output" in caplog.text
-        assert "Structured selection output" in caplog.text
+        assert "Structured selection output" not in caplog.text
 
     @patch("backend.services.agent.agent_chat.AgentChat._build_client")
     def test_analyst_agent_graph_query_flow(self, mock_build_client, real_sample_db):
@@ -182,25 +166,18 @@ class TestAnalystAgentIntegration:
         planner_llm.invoke.return_value = ExecutionPlan(
             tasks=[PlanStep(specialist="sql", objective="Contar títulos")]
         )
-        contribution_llm = MagicMock()
-        contribution_llm.invoke.return_value = SpecialistContribution(
-            step_id="", specialist="sql", summary="Total de títulos",
-            blocks=[MetricBlock(label="Total Títulos", value="{{meta.call_sql_1.data.rows_preview.0.total}}")],
-        )
         review_llm = MagicMock()
         review_llm.invoke.return_value = InvestigationDecision(
-            action="finalize", reason="La evidencia responde la pregunta."
+            action="finalize", reason="La evidencia responde la pregunta.",
+            summary="Hay {{meta.call_sql_1.data.rows_preview.0.total}} títulos en Netflix",
         )
         formatter_llm = MagicMock()
         formatter_llm.invoke.return_value = AgentResponse(
             summary="Hay {{meta.call_sql_1.data.rows_preview.0.total}} títulos en Netflix",
-            blocks=[
-                MetricBlock(label="Total Títulos", value="{{meta.call_sql_1.data.rows_preview.0.total}}"),
-                MarkdownBlock(content="Hay {{meta.call_sql_1.data.rows_preview.0.total}} títulos en la base de datos de Netflix.")
-            ]
+            blocks=[MarkdownBlock(content="Hay títulos en la base de datos de Netflix.")],
         )
         mock_llm.with_structured_output.side_effect = [
-            planner_llm, contribution_llm, review_llm, formatter_llm
+            planner_llm, review_llm, formatter_llm
         ]
 
         agent = AnalystAgent(
@@ -231,7 +208,7 @@ class TestAnalystAgentIntegration:
         assert reply.text == "Hay Dato no disponible títulos en Netflix"
         assert reply.metadata == {}
         assert reply.blocks is not None
-        assert len(reply.blocks) == 2
+        assert len(reply.blocks) == 1
         assert reply.data is not None
 
     @patch("backend.services.agent.agent_chat.AgentChat._build_client")
@@ -274,24 +251,13 @@ class TestAnalystAgentIntegration:
         planner_llm.invoke.return_value = ExecutionPlan(
             tasks=[PlanStep(specialist="visualization", objective="Mostrar tendencia de duración")]
         )
-        contribution_llm = MagicMock()
-        contribution_llm.invoke.return_value = SpecialistContribution(
-            step_id="",
-            specialist="visualization",
-            summary="Tendencia de duración por década.",
-            blocks=[MarkdownBlock(content="Tendencia de duración por década.")],
-        )
         review_llm = MagicMock()
         review_llm.invoke.return_value = InvestigationDecision(
-            action="finalize", reason="La gráfica y la evidencia responden la solicitud."
+            action="finalize", reason="La gráfica y la evidencia responden la solicitud.", summary="Duración por década."
         )
-        formatter_llm = MagicMock()
-        formatter_llm.invoke.return_value = AgentResponse(summary="Duración por década.")
         mock_llm.with_structured_output.side_effect = [
             planner_llm,
-            contribution_llm,
             review_llm,
-            formatter_llm,
         ]
 
         agent = AnalystAgent(
