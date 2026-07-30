@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
@@ -134,28 +133,6 @@ def render_chat_messages(messages: list[dict[str, Any]]) -> None:
                 data = content.get("data") or []
                 if data:
                     render_agent_response({"blocks": data, "summary": text, "metadata": content.get("metadata")})
-
-
-def select_from_options(
-    label: str,
-    options: list[int],
-    format_func: Callable[[int], str],
-    key: str,
-    default_id: int | None,
-):
-    if not options:
-        st.selectbox(label, options=[], key=key, disabled=True)
-        return None
-    if default_id not in options:
-        default_id = options[0]
-    index = options.index(default_id)
-    return st.selectbox(
-        label,
-        options=options,
-        index=index,
-        format_func=format_func,
-        key=key,
-    )
 
 
 def render_empty_state(

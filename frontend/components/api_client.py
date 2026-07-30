@@ -302,14 +302,6 @@ def upload_runtime_database(
     )
 
 
-def get_runtime_database_schema(*, runtime_db_id: str, user_id: int) -> dict[str, Any]:
-    return _request(
-        "GET",
-        f"/runtime-databases/{runtime_db_id}/schema",
-        params={"user_id": user_id},
-    )
-
-
 def list_messages(chat_id: int) -> list[dict[str, Any]]:
     return _request("GET", f"/chats/{chat_id}/messages")
 

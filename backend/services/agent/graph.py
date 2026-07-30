@@ -15,7 +15,6 @@ from backend.services.agent.state import (
     AgentTask,
     SpecialistState,
     TaskResult,
-    TaskStatus,
     ToolArtifact,
     SpecialistContribution,
 )
@@ -33,10 +32,6 @@ def route_tool_calls(state: Any) -> str:
     if not getattr(state, "messages", None):
         return "next"
     return "tools" if getattr(state.messages[-1], "tool_calls", []) else "next"
-
-
-def _terminal(status: TaskStatus) -> bool:
-    return status in {"completed", "failed", "skipped"}
 
 
 def _result_by_task(state: AgentState) -> dict[str, TaskResult]:

@@ -377,44 +377,6 @@ class UserDatabase:
         except sqlite3.Error as exc:
             return f"Error de sintaxis o esquema: {exc}"
             
-    def analyze_trend_pandas(self, database_id: str, *, user_id: int, table_name: str, date_column: str, metric_column: str) -> dict:
-        import pandas as pd
-        self.validate_table_columns(
-            database_id, user_id=user_id, table_name=table_name,
-            column_names=[date_column, metric_column],
-        )
-        sql = f"SELECT {quote_identifier(date_column)} as date, {quote_identifier(metric_column)} as metric FROM {quote_identifier(table_name)} WHERE {quote_identifier(date_column)} IS NOT NULL ORDER BY {quote_identifier(date_column)}"
-        res = self.execute_analytic_query(database_id, user_id=user_id, sql=sql)
-        if not res.rows:
-            return {"error": "No hay suficientes datos para analizar la tendencia."}
-        df = pd.DataFrame(res.rows)
-        try:
-            df['date'] = pd.to_datetime(df['date'])
-            df['metric'] = pd.to_numeric(df['metric'], errors='coerce')
-            df = df.dropna()
-            if df.empty:
-                return {"error": "Columna métrica no contiene datos numéricos o fechas inválidas."}
-            df = df.sort_values('date')
-            if len(df) < 2:
-                return {"error": "No hay suficientes periodos para calcular una tendencia."}
-            first_value = float(cast(Any, df['metric'].iloc[0]))
-            last_value = float(cast(Any, df['metric'].iloc[-1]))
-            pct_change = None if first_value == 0 else ((last_value - first_value) / abs(first_value)) * 100
-            direction = "up" if last_value > first_value else "down" if last_value < first_value else "stable"
-            direction_text = {"up": "al alza", "down": "a la baja", "stable": "estable"}[direction]
-            return {
-                "metric": metric_column,
-                "direction": direction,
-                "pct_change": pct_change,
-                "message": f"La tendencia de {metric_column} está {direction_text}.",
-                "average_change_per_period": float(
-                    cast(Any, cast(Any, df['metric']).diff().mean())
-                ),
-                "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else [],
-            }
-        except Exception as e:
-            return {"error": f"Error calculando tendencia: {e}"}
-
     def _scope_where(self, database_id: str, *, user_id: int, scope: AnalysisScope) -> tuple[str, list[object]]:
         columns = [item.column for item in scope.filters]
         self.validate_table_columns(database_id, user_id=user_id, table_name=scope.table_name, column_names=columns)
@@ -622,39 +584,6 @@ class UserDatabase:
         data["suggested_blocks"] = [MarkdownBlock(content=("No se detectaron anomalías relevantes." if not outliers else f"Se detectaron {len(outliers)} segmentos fuera del rango esperado.")).model_dump(), TableBlock(title="Segmentos atípicos", columns=list(outliers[0]) if outliers else [scope.dimension_column or "segment", "value"], data=outliers).model_dump()]
         return data
 
-    def detect_outliers_pandas(self, database_id: str, *, user_id: int, table_name: str, category_column: str, metric_column: str) -> dict:
-        import pandas as pd
-        import numpy as np
-        self.validate_table_columns(
-            database_id, user_id=user_id, table_name=table_name,
-            column_names=[category_column, metric_column],
-        )
-        sql = f"SELECT {quote_identifier(category_column)} as category, {quote_identifier(metric_column)} as metric FROM {quote_identifier(table_name)} WHERE {quote_identifier(metric_column)} IS NOT NULL"
-        res = self.execute_analytic_query(database_id, user_id=user_id, sql=sql)
-        if not res.rows:
-            return {"error": "No hay datos."}
-        df = pd.DataFrame(res.rows)
-        try:
-            df['metric'] = pd.to_numeric(df['metric'], errors='coerce')
-            df = df.dropna()
-            mean = df['metric'].mean()
-            std = df['metric'].std()
-            if std == 0:
-                return {"message": "No se detectaron anomalías: los valores comparables son iguales.", "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else []}
-            df['z_score'] = (df['metric'] - mean) / std
-            outliers = df[np.abs(df['z_score']) > 2]
-            if outliers.empty:
-                return {"message": "No se detectaron anomalías en los datos analizados.", "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else []}
-            return {
-                "message": f"Se encontraron {len(outliers)} anomalías.",
-                "outliers": cast(
-                    list[dict[str, Any]], cast(Any, outliers[['category', 'metric']]).to_dict('records')
-                ),
-                "warnings": ["El análisis se calculó sobre una muestra limitada."] if res.truncated else [],
-            }
-        except Exception as e:
-            return {"error": f"Error detectando anomalías: {e}"}
-
     def execute_readonly_query(
         self,
         database_id: str,
@@ -692,45 +621,6 @@ class UserDatabase:
                 }
             )
 
-        return QueryResult(
-            columns=selected_columns,
-            rows=formatted_rows,
-            row_count=len(formatted_rows),
-            truncated=truncated,
-        )
-
-    def execute_analytic_query(
-        self,
-        database_id: str,
-        *,
-        user_id: int,
-        sql: str,
-        max_rows: int = MAX_ANALYTIC_ROWS,
-    ) -> QueryResult:
-        """Read a bounded larger sample for internal statistical calculations."""
-        database = self.get_database(database_id, user_id=user_id)
-        safe_limit = max(1, min(max_rows, MAX_ANALYTIC_ROWS))
-        limited_sql = limit_readonly_sql(sql, max_rows=safe_limit + 1)
-        try:
-            with self._connect_readonly(database.path) as connection:
-                cursor = connection.execute(limited_sql)
-                raw_columns = [description[0] for description in cursor.description or []]
-                selected_columns = raw_columns[:MAX_COLUMNS]
-                rows = cursor.fetchall()
-        except sqlite3.Error as exc:
-            raise RuntimeDatabaseError(
-                "No pude completar el análisis con la estructura actual de la base."
-            ) from exc
-
-        truncated = len(rows) > safe_limit
-        formatted_rows = [
-            {
-                column: self._to_json_value(row[column])
-                for column in selected_columns
-                if column in row.keys()
-            }
-            for row in rows[:safe_limit]
-        ]
         return QueryResult(
             columns=selected_columns,
             rows=formatted_rows,
