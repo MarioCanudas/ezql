@@ -44,6 +44,7 @@ typeCheckingMode = "standard"
 exclude = [
     "**/node_modules",
     "**/__pycache__",
+    ".agents",
     ".venv"
 ]
 venvPath = "."
@@ -52,7 +53,10 @@ venv = ".venv"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "real_agent: executes real prompts with the locally configured test account",
+]
 
 [tool.poe.tasks]
 run-app = { shell = "PIDS=$(lsof -ti tcp:8000); if [ -n \"$PIDS\" ]; then kill $PIDS; sleep 2; PIDS=$(lsof -ti tcp:8000); if [ -n \"$PIDS\" ]; then kill -9 $PIDS; sleep 1; fi; fi; trap 'kill $BACKEND_PID' EXIT; uv run fastapi dev backend/main.py --host 127.0.0.1 --port 8000 & BACKEND_PID=$!; sleep 2; uv run streamlit run frontend/app.py", help = "Run FastAPI backend and Streamlit frontend" }
-run-test = { cmd = "uv run pytest tests/ -v --tb=short", help = "Run the backend test suite" }
+run-test = { shell = "EZQL_RUN_REAL_AGENT_TESTS=1 uv run pytest -v --tb=short", help = "Run the complete local application suite, including real agent scenarios" }
